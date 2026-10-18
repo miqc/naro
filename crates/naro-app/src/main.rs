@@ -1850,6 +1850,74 @@ fn run_compat(dir: &str) -> i32 {
                         notes.push(format!("cor ainda presente: #{want}"));
                     }
                 }
+                "computed" => {
+                    // computed:<selector>:<prop>=<value> — the cascaded value
+                    // of a property on the first element matching the
+                    // selector. This is what `getComputedStyle` reports, so a
+                    // page and its check share one formatter.
+                    let Some((target, want)) = value.split_once('=') else {
+                        ok = false;
+                        notes.push(format!("computed malformado: {value:?}"));
+                        continue;
+                    };
+                    let Some((selector, prop)) = target.rsplit_once(':') else {
+                        ok = false;
+                        notes.push(format!("computed sem propriedade: {value:?}"));
+                        continue;
+                    };
+                    let Some(node) = engine
+                        .doc
+                        .as_ref()
+                        .and_then(|doc| naro_css::query_selector(doc, selector))
+                    else {
+                        ok = false;
+                        notes.push(format!("seletor sem nó: {selector:?}"));
+                        continue;
+                    };
+                    match naro_css::computed_value(&engine.styles[node], prop) {
+                        Some(got) => {
+                            if got != want {
+                                ok = false;
+                                notes.push(format!(
+                                    "{selector} {prop} {got:?} != {want:?}"
+                                ));
+                            }
+                        }
+                        None => {
+                            ok = false;
+                            notes.push(format!("propriedade não suportada: {prop:?}"));
+                        }
+                    }
+                }
+                "attr" => {
+                    // attr:<selector>:<name>=<value> — the attribute value on
+                    // the first element matching the selector. `""` matches a
+                    // present-but-empty attribute; use `attr?` for presence.
+                    let Some((target, want)) = value.split_once('=') else {
+                        ok = false;
+                        notes.push(format!("attr malformado: {value:?}"));
+                        continue;
+                    };
+                    let Some((selector, name)) = target.rsplit_once(':') else {
+                        ok = false;
+                        notes.push(format!("attr sem nome: {value:?}"));
+                        continue;
+                    };
+                    let got = engine.doc.as_ref().and_then(|doc| {
+                        naro_css::query_selector(doc, selector).and_then(|node| doc.attr(node, name))
+                    });
+                    match got {
+                        Some(got) if got == want => {}
+                        Some(got) => {
+                            ok = false;
+                            notes.push(format!("{selector} @{name} {got:?} != {want:?}"));
+                        }
+                        None => {
+                            ok = false;
+                            notes.push(format!("atributo ausente: {selector} @{name}"));
+                        }
+                    }
+                }
                 "nojsrerror" => {
                     if let Some(err) = engine.js.errors.first() {
                         ok = false;

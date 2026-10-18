@@ -528,6 +528,88 @@ impl Default for ComputedStyle {
     }
 }
 
+/// A number the way CSS renders it: no trailing `.0`, at most two decimals.
+fn css_num(v: f32) -> String {
+    if (v - v.round()).abs() < 0.001 {
+        format!("{}", v.round() as i64)
+    } else {
+        format!("{v:.2}").trim_end_matches('0').to_string()
+    }
+}
+
+/// A length the way CSS renders it, keeping percentages symbolic.
+fn css_dim(d: &Dim) -> String {
+    match d {
+        Dim::Linear { px, percent } => {
+            if *percent == 0.0 {
+                format!("{}px", css_num(*px))
+            } else if *px == 0.0 {
+                format!("{}%", css_num(*percent))
+            } else {
+                format!("calc({}px + {}%)", css_num(*px), css_num(*percent))
+            }
+        }
+        Dim::Min(a, b) => format!("min({}, {})", css_dim(a), css_dim(b)),
+        Dim::Max(a, b) => format!("max({}, {})", css_dim(a), css_dim(b)),
+        Dim::Clamp(lo, value, hi) => {
+            format!("clamp({}, {}, {})", css_dim(lo), css_dim(value), css_dim(hi))
+        }
+    }
+}
+
+/// The computed value of `prop` on `style`, formatted the way CSS does.
+///
+/// Single source of truth for both the `computed:` compat check and the JS
+/// `getComputedStyle()` host function, so a page and a check can never
+/// disagree about what a property is worth. `None` means the property is not
+/// modelled here; callers turn that into a failure or an empty string.
+pub fn computed_value(style: &ComputedStyle, prop: &str) -> Option<String> {
+    let value = match prop {
+        "display" => match style.display {
+            Display::Block => "block",
+            Display::Inline => "inline",
+            Display::InlineBlock => "inline-block",
+            Display::Flex => "flex",
+            Display::Grid => "grid",
+            Display::Table => "table",
+            Display::TableRow => "table-row",
+            Display::TableCell => "table-cell",
+            Display::Contents => "contents",
+            Display::None => "none",
+        }
+        .to_string(),
+        "color" => style.color.to_hex(),
+        "background-color" => style.background.to_hex(),
+        "font-size" => format!("{}px", css_num(style.font_size)),
+        "font-weight" => style.font_weight.to_string(),
+        "line-height" => css_num(style.line_height * style.font_size) + "px",
+        "width" => style.width.as_ref().map(css_dim).unwrap_or_else(|| "auto".to_string()),
+        "height" => style.height.as_ref().map(css_dim).unwrap_or_else(|| "auto".to_string()),
+        "margin-top" => css_dim(&style.margin.top),
+        "margin-left" => css_dim(&style.margin.left),
+        "padding-top" => css_dim(&style.padding.top),
+        "padding-left" => css_dim(&style.padding.left),
+        "position" => match style.position {
+            Position::Static => "static",
+            Position::Relative => "relative",
+            Position::Absolute => "absolute",
+            Position::Fixed => "fixed",
+        }
+        .to_string(),
+        "opacity" => css_num(style.opacity),
+        "text-align" => match style.text_align {
+            TextAlign::Left => "left",
+            TextAlign::Center => "center",
+            TextAlign::Right => "right",
+        }
+        .to_string(),
+        "visibility" => if style.visible { "visible" } else { "hidden" }.to_string(),
+        "border-radius" => format!("{}px", css_num(style.border_radius)),
+        _ => return None,
+    };
+    Some(value)
+}
+
 impl ComputedStyle {
     /// True when the two styles can produce different box geometry.
     ///

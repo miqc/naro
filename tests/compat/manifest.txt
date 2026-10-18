@@ -12,6 +12,16 @@
 #   click:SEL   -> dispatch a click on the centre of the first element matching SEL
 #   restyle:N   -> the cascade was recomputed exactly N times
 #   relayout:N  -> the boxes were rebuilt exactly N times
+#   computed:SEL:PROP=VALUE -> the cascaded value of PROP on the first element
+#                              matching SEL, formatted the way CSS renders it
+#                              (e.g. computed:#a:display=block, computed:p:font-size=16px,
+#                              computed:.box:margin-top=0px, computed:#x:width=50%)
+#                              supported PROPs: display color background-color font-size
+#                              font-weight line-height width height margin-top margin-left
+#                              padding-top padding-left position opacity text-align
+#                              visibility border-radius; an unknown PROP fails the check
+#   attr:SEL:NAME=VALUE -> the first element matching SEL has attribute NAME = VALUE
+#                          (e.g. attr:input[type=checkbox]:checked=, attr:a:href=/x)
 #   nojsrerror   -> no JS error recorded
 #   unsupported:reason -> case is known-unsupported, counted separately
 01-plain.html | text:Sem JavaScript | text:Segundo parágrafo. | nojsrerror
