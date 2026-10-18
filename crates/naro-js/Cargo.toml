@@ -8,4 +8,5 @@ license.workspace = true
 rquickjs = { version = "0.9", default-features = false, features = [] }
 naro-html.workspace = true
 naro-css.workspace = true
+naro-net.workspace = true
 url.workspace = true

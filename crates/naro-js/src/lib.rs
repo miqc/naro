@@ -67,6 +67,22 @@ fn with_deadline<T>(f: impl FnOnce() -> T) -> T {
     out
 }
 
+/// Run `f` with the script deadline suspended.
+///
+/// A host function that waits on the network is not running bytecode, so the
+/// interrupt handler cannot fire anyway; clearing the deadline is what keeps
+/// the *next* instruction from being interrupted for time the script did not
+/// spend. The previous deadline is restored on the way out.
+fn without_deadline<T>(f: impl FnOnce() -> T) -> T {
+    DEADLINE.with(|d| {
+        let saved = d.get();
+        d.set(None);
+        let out = f();
+        d.set(saved);
+        out
+    })
+}
+
 /// What a DOM mutation made stale.
 ///
 /// Produced by the JavaScript side through `__naro_invalidate`, consumed once
@@ -1058,6 +1074,201 @@ const BOOTSTRAP: &str = r##"
     return JSON.parse(JSON.stringify(value));
   };
 
+  // --- fetch and XMLHttpRequest ------------------------------------------
+  // Both are synchronous under the hood: `__naro_fetch` blocks until the
+  // response arrives, and the `Promise` that `fetch` returns is already
+  // settled. A page that awaits it therefore makes progress, but a page that
+  // starts a request and keeps working does not get concurrency — documented
+  // limitation, chosen to keep one script thread and one ordering rule.
+  const flattenHeaders = (headers) => {
+    const out = [];
+    if (!headers) return out;
+    if (typeof headers.forEach === "function" && !Array.isArray(headers)) {
+      headers.forEach((value, name) => { out.push(String(name), String(value)); });
+    } else if (Array.isArray(headers)) {
+      for (const pair of headers) out.push(String(pair[0]), String(pair[1]));
+    } else if (typeof headers === "object") {
+      for (const name of Object.keys(headers)) out.push(name, String(headers[name]));
+    }
+    return out;
+  };
+
+  const requestSync = (method, url, body, headers) => {
+    const absolute = urlParts(url).href || String(url);
+    const raw = __naro_fetch(String(method || "GET"), absolute, body === undefined || body === null ? "" : String(body), flattenHeaders(headers));
+    const error = raw[4] || "";
+    return {
+      status: Number(raw[0]) || 0,
+      statusText: raw[1] || "",
+      text: raw[2] || "",
+      url: raw[3] || absolute,
+      error
+    };
+  };
+
+  class Headers {
+    constructor(init) {
+      this.__map = new Map();
+      const flat = flattenHeaders(init);
+      for (let i = 0; i + 1 < flat.length; i += 2) this.__map.set(flat[i].toLowerCase(), flat[i + 1]);
+    }
+    get(name) { const v = this.__map.get(String(name).toLowerCase()); return v === undefined ? null : v; }
+    set(name, value) { this.__map.set(String(name).toLowerCase(), String(value)); }
+    append(name, value) { this.set(name, value); }
+    has(name) { return this.__map.has(String(name).toLowerCase()); }
+    delete(name) { this.__map.delete(String(name).toLowerCase()); }
+    forEach(fn, thisArg) { this.__map.forEach((v, k) => fn.call(thisArg, v, k, this)); }
+    keys() { return this.__map.keys(); }
+    values() { return this.__map.values(); }
+    entries() { return this.__map.entries(); }
+    [Symbol.iterator]() { return this.__map.entries(); }
+  }
+
+  class Response {
+    constructor(result, requestUrl) {
+      this.status = result.status;
+      this.statusText = result.statusText;
+      this.ok = result.status >= 200 && result.status < 300;
+      this.url = result.url || requestUrl;
+      this.redirected = false;
+      this.type = "basic";
+      this.bodyUsed = false;
+      this.headers = new Headers();
+      this.__text = result.text;
+      this.__used = false;
+    }
+    get body() { return null; }
+    text() {
+      this.__used = true;
+      this.bodyUsed = true;
+      return Promise.resolve(this.__text);
+    }
+    json() {
+      this.__used = true;
+      this.bodyUsed = true;
+      try { return Promise.resolve(JSON.parse(this.__text)); }
+      catch (e) { return Promise.reject(e); }
+    }
+    clone() {
+      const copy = Object.create(Response.prototype);
+      Object.assign(copy, this);
+      return copy;
+    }
+  }
+
+  globalThis.fetch = function (input, init) {
+    init = init || {};
+    const url = typeof input === "string" ? input : String(input && input.url ? input.url : input);
+    const method = init.method || (input && input.method) || "GET";
+    const body = init.body === undefined || init.body === null ? "" : init.body;
+    const result = requestSync(method, url, body, init.headers);
+    if (result.error) {
+      return Promise.reject(new TypeError(result.error));
+    }
+    return Promise.resolve(new Response(result, url));
+  };
+
+  globalThis.Headers = Headers;
+  globalThis.Response = Response;
+  globalThis.Request = function Request(input, init) {
+    init = init || {};
+    this.url = typeof input === "string" ? input : String(input && input.url ? input.url : input);
+    this.method = init.method || "GET";
+    this.headers = new Headers(init.headers);
+    this.body = init.body === undefined ? null : init.body;
+  };
+
+  // `XMLHttpRequest` reports through `readyState` and `onreadystatechange`;
+  // `send` performs the request and fires the callbacks in order, which is
+  // what a synchronous host call can honestly offer.
+  const XHR_UNSENT = 0, XHR_OPENED = 1, XHR_HEADERS = 2, XHR_LOADING = 3, XHR_DONE = 4;
+  class XMLHttpRequest {
+    constructor() {
+      this.readyState = XHR_UNSENT;
+      this.status = 0;
+      this.statusText = "";
+      this.responseText = "";
+      this.response = "";
+      this.responseType = "";
+      this.onload = null;
+      this.onerror = null;
+      this.onreadystatechange = null;
+      this.onloadend = null;
+      this.__method = "GET";
+      this.__url = "";
+      this.__headers = [];
+      this.__listeners = [];
+    }
+    open(method, url) {
+      this.__method = String(method || "GET").toUpperCase();
+      this.__url = String(url);
+      this.readyState = XHR_OPENED;
+      this.__fire("readystatechange");
+    }
+    setRequestHeader(name, value) {
+      this.__headers.push([String(name), String(value)]);
+      this.readyState = XHR_HEADERS;
+    }
+    getResponseHeader() { return null; }
+    getAllResponseHeaders() { return ""; }
+    addEventListener(type, fn) {
+      if (typeof fn === "function") this.__listeners.push({ type: String(type), fn });
+    }
+    removeEventListener(type, fn) {
+      const i = this.__listeners.findIndex((l) => l.type === String(type) && l.fn === fn);
+      if (i >= 0) this.__listeners.splice(i, 1);
+    }
+    __fire(type) {
+      const ev = new Event(type);
+      ev.target = this;
+      ev.currentTarget = this;
+      const handler = this["on" + type];
+      if (typeof handler === "function") {
+        try { handler.call(this, ev); } catch (e) { report(e); }
+      }
+      for (const l of this.__listeners.slice()) {
+        if (l.type !== type) continue;
+        try { l.fn.call(this, ev); } catch (e) { report(e); }
+      }
+    }
+    abort() { this.readyState = XHR_UNSENT; }
+    send(body) {
+      const result = requestSync(this.__method, this.__url, body, this.__headers);
+      if (result.error) {
+        this.status = 0;
+        this.readyState = XHR_DONE;
+        this.__fire("readystatechange");
+        this.__fire("error");
+        this.__fire("loadend");
+        return;
+      }
+      this.status = result.status;
+      this.statusText = result.statusText;
+      this.responseText = result.text;
+      this.response = result.text;
+      this.readyState = XHR_LOADING;
+      this.__fire("readystatechange");
+      this.readyState = XHR_DONE;
+      this.__fire("readystatechange");
+      this.__fire("load");
+      this.__fire("loadend");
+    }
+  }
+  XMLHttpRequest.UNSENT = XHR_UNSENT;
+  XMLHttpRequest.OPENED = XHR_OPENED;
+  XMLHttpRequest.HEADERS_RECEIVED = XHR_HEADERS;
+  XMLHttpRequest.LOADING = XHR_LOADING;
+  XMLHttpRequest.DONE = XHR_DONE;
+  globalThis.XMLHttpRequest = XMLHttpRequest;
+
+  // `document.cookie`: one string of `name=value` pairs, `HttpOnly` hidden.
+  // Assigning replaces the cookie with that name at the document's path.
+  Object.defineProperty(globalThis.document, "cookie", {
+    get() { return __naro_cookie_get(); },
+    set(value) { __naro_cookie_set(String(value)); },
+    configurable: true
+  });
+
   // --- Custom Elements (minimal) ---------------------------------------
   // `define` registers a constructor and upgrades the elements that already
   // exist; elements created or inserted later are upgraded on the way in.
@@ -1604,10 +1815,35 @@ impl JsSession {
     }
 
     pub fn drain_microtasks(&self) -> ScriptOutcome {
-        self.call_js("microtasks", |ctx| {
+        // Two queues have to be drained: our own `queueMicrotask` array and
+        // QuickJS's job queue, which is where native `Promise` reactions go.
+        // Without the second one every `fetch(...).then(...)` would silently
+        // never run.
+        let mut out = self.call_js("microtasks", |ctx| {
             let f = ctx.globals().get::<_, Function>("__naro_run_microtasks")?;
             f.call::<_, ()>(())
-        })
+        });
+        let jobs = with_deadline(|| {
+            self.context.with(|ctx| {
+                let mut ran = 0;
+                // Bounded: a promise chain that keeps re-queueing must not
+                // hold the engine forever.
+                while ran < 1000 {
+                    if ctx.execute_pending_job() {
+                        ran += 1;
+                    } else {
+                        break;
+                    }
+                }
+                ran
+            })
+        });
+        if jobs >= 1000 {
+            out.errors
+                .push("microtasks: cadeia de promessas não terminou".to_string());
+        }
+        out.merge(self.take_errors("microtasks"));
+        out
     }
 
     pub fn run_timers(&self, budget_ms: i64) -> ScriptOutcome {
@@ -2620,6 +2856,81 @@ fn register(ctx: &rquickjs::Ctx<'_>, dom: &Rc<RefCell<Dom>>) -> rquickjs::Result
         "__naro_utf8_decode",
         Function::new(ctx.clone(), move |bytes: Vec<u8>| -> String {
             String::from_utf8_lossy(&bytes).to_string()
+        })?,
+    )?;
+
+    // --- network surface (A2) --------------------------------------------
+    // `fetch` and `XMLHttpRequest` are synchronous underneath: the host call
+    // blocks the JS thread until the response arrives. That keeps one script
+    // thread and one ordering rule (a `fetch` before a `fetch`), at the cost
+    // of a slow server freezing the page for up to the transport timeout.
+
+    let d = dom.clone();
+    globals.set(
+        "__naro_fetch",
+        Function::new(
+            ctx.clone(),
+            move |method: String,
+                url: String,
+                body: String,
+                headers: Vec<String>| -> Vec<String> {
+                let base = d.borrow().url.clone();
+                let absolute = naro_net::resolve(&base, &url).unwrap_or(url);
+                let mut pairs: Vec<(String, String)> = Vec::new();
+                let mut i = 0usize;
+                while i + 1 < headers.len() {
+                    pairs.push((headers[i].clone(), headers[i + 1].clone()));
+                    i += 2;
+                }
+                let method = if method.is_empty() {
+                    "GET".to_string()
+                } else {
+                    method.to_ascii_uppercase()
+                };
+                let payload = if body.is_empty() { None } else { Some(body) };
+                let result = without_deadline(|| {
+                    naro_net::with_session(|net| {
+                        net.request(&method, &absolute, payload.as_deref().map(str::as_bytes), &pairs)
+                    })
+                });
+                match result {
+                    Ok(response) => vec![
+                        response.status.to_string(),
+                        response.status_text.clone(),
+                        response.text(),
+                        response.url.clone(),
+                        String::new(),
+                    ],
+                    Err(err) => vec![
+                        "0".to_string(),
+                        String::new(),
+                        String::new(),
+                        absolute,
+                        err,
+                    ],
+                }
+            },
+        )?,
+    )?;
+
+    let d = dom.clone();
+    globals.set(
+        "__naro_cookie_get",
+        Function::new(ctx.clone(), move || -> String {
+            let url = d.borrow().url.clone();
+            naro_net::with_session(|net| Ok(net.cookie_string(&url))).unwrap_or_default()
+        })?,
+    )?;
+
+    let d = dom.clone();
+    globals.set(
+        "__naro_cookie_set",
+        Function::new(ctx.clone(), move |value: String| {
+            let url = d.borrow().url.clone();
+            let _ = naro_net::with_session(|net| {
+                net.set_cookie_string(&url, &value);
+                Ok(())
+            });
         })?,
     )?;
 

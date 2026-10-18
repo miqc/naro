@@ -8,19 +8,44 @@ Marco em execução: **v0.2** (fases A0, A1, A2, A3, A7). Plano: `local://naro-g
 |---|---|---|---|---|
 | A0 | concluída | tag `baseline-f8` + `phase-a0`; `228 passed / 0 failed`; `--compat` 27/0/1; `computed:`/`attr:` verificados em positivo e negativo | 1 | baseline registrado abaixo |
 | A1 | concluída | tag `phase-a1`; `228 passed / 0 failed`; `--compat` **28 pass / 0 falhas / 1 não suportado** (29 total); `29-platform.html` com 46 checks; 4 páginas de referência com `JS ERROR` idênticos ao baseline e `CONTENT_HEIGHT` idêntico; `diff reports/p8-rust.txt` = 0 | 1 | ver desvios abaixo |
-| A2 | pendente | — | 0 | depende de A1 (concluída) |
+| A2 | concluída | tag `phase-a2`; `233 passed / 0 failed`; `--compat` **28 pass / 0 falhas / 2 não suportados** (30) e `--compat --serve` **29 pass / 0 falhas / 1 não suportado**; `30-net.html` com 19 checks provando fetch, XHR, cache (1 requisição ao servidor para 3 pedidos), revalidação 304, cookie de ida e volta, `HttpOnly` invisível ao script, POST e charset windows-1252; 4 páginas de referência idênticas ao baseline; `diff reports/p8-rust.txt` = 0 | 1 | ver desvios abaixo |
 | A3 | pendente | — | 0 | depende de A1 (concluída); POST depende de A2 |
 | A7 | pendente | — | 0 | depende de A2 e A3 |
 | Marco v0.2 | pendente | — | 0 | `reports/milestone-v0.2.md` |
 
 ## Próxima ação
 
-A2, passo 1: criar `NetSession` em `crates/naro-net` e migrar os 5 chamadores de
-`naro_net::fetch` em `crates/naro-app/src/main.rs`.
+A3, passo 1: `checkbox`/`radio` em `naro-layout` (caixa fixa 13x13 com borda de 1 px)
+e o traço de marcado em `naro-paint`.
 
 ## Bloqueios
 
 Nenhum.
+
+## Desvios e decisões de A2
+
+1. A sessão de rede é **de processo** (`naro_net::session()`, `LazyLock`), não um
+   campo `App { net: Arc<Mutex<NetSession>> }` como o plano descrevia. Efeito prático
+   igual (keep-alive, cache e cookies sobrevivem à navegação), com dois ganhos: os
+   threads de fetch não precisam receber o `Arc`, e `--compat`, `--bench` e o modo
+   headless usam a mesma sessão sem plumbing. Concorrência preservada: só o cache e o
+   jar de cookies ficam atrás de `Mutex`, nunca a requisição.
+2. `fetch`/`XHR` bloqueiam a thread JS, como planejado, mas descobriu-se que as
+   reações de `Promise` **não rodavam de jeito nenhum**: `drain_microtasks` só drenava
+   a fila do `queueMicrotask` do bootstrap, e o QuickJS guarda as reações de promessa
+   nativa na própria job queue. Agora `drain_microtasks` também chama
+   `Ctx::execute_pending_job` (limite de 1000 jobs, com erro se estourar). Sem isso
+   nenhuma página real com `fetch(...).then(...)` funcionaria.
+3. `--compat` ganhou `--verbose` (imprime `LOG`/`ERR` de cada página) e a chave de
+   manifesto `served`, que conta o caso como não suportado em `file://`. Sem isso a
+   página de rede não teria como passar nos dois modos.
+4. `NetSession::request` devolve status não-2xx como resposta, não como erro: um
+   `fetch` precisa ver 404. Só falha de transporte vira `Err`.
+5. Cookies: `HttpOnly` é enviado no fio e escondido de `document.cookie`; cookie sem
+   `Domain` é *host-only* (não vai para subdomínio), e `Max-Age=0`/`Expires` no
+   passado remove.
+6. Charset: `encoding_rs` decodifica pelo `charset=` declarado; sem declaração,
+   UTF-8 estrito e depois `windows-1252`.
 
 ## Desvios e decisões de A1
 

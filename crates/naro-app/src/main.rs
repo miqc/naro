@@ -409,7 +409,7 @@ impl App {
                 let proxy_for_fetch = proxy.clone();
                 let generation = nav.generation;
                 std::thread::spawn(move || {
-                    let result = naro_net::fetch(&fetch_url);
+                    let result = naro_net::with_session(|net| net.fetch(&fetch_url));
                     let _ = proxy_for_fetch.send_event(UserEvent::Fetched {
                         tab: active_id,
                         generation,
@@ -541,7 +541,7 @@ impl App {
             let generation = nav.generation;
             let tab = self.active_id;
             std::thread::spawn(move || {
-                let result = naro_net::fetch(&url);
+                let result = naro_net::with_session(|net| net.fetch(&url));
                 let _ = proxy.send_event(UserEvent::Fetched { tab, generation, result });
             });
         }
@@ -1505,7 +1505,7 @@ fn load_for_headless(target: &str, width: f32) -> Engine {
     let url = normalize_input(target);
     let nav = engine.navigate(&url, true);
     if let Some(fetch_url) = nav.fetch {
-        let result = naro_net::fetch(&fetch_url);
+        let result = naro_net::with_session(|net| net.fetch(&fetch_url));
         engine.apply_fetch(nav.generation, result);
     }
     engine
@@ -1569,9 +1569,280 @@ fn peak_bytes() -> usize {
     PEAK.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// A tiny HTTP server over `tests/compat`, so `--serve` can exercise the
+/// parts of the platform that need a real origin: `fetch`, cookies, CORS and
+/// the HTTP cache.
+///
+/// Deliberately not a general-purpose server: `Connection: close`, one
+/// request per connection, no keep-alive, no chunked bodies.
+struct CompatServer {
+    port: u16,
+    /// Request counts per path, so a page can prove a response was cached.
+    counts: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>>,
+}
+
+impl CompatServer {
+    fn start(base: &std::path::Path) -> Result<CompatServer, String> {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")
+            .map_err(|e| format!("não foi possível abrir a porta: {e}"))?;
+        let port = listener
+            .local_addr()
+            .map_err(|e| format!("endereço local indisponível: {e}"))?
+            .port();
+        let counts = std::sync::Arc::new(std::sync::Mutex::new(
+            std::collections::HashMap::<String, usize>::new(),
+        ));
+        let root = base.to_path_buf();
+        let shared = counts.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else { continue };
+                let root = root.clone();
+                let counts = shared.clone();
+                std::thread::spawn(move || {
+                    let _ = serve_one(stream, &root, &counts);
+                });
+            }
+        });
+        Ok(CompatServer { port, counts })
+    }
+
+    fn url_for(&self, file: &str) -> String {
+        format!("http://127.0.0.1:{}/{}", self.port, file)
+    }
+
+    /// How many times a path was requested since the server started.
+    #[allow(dead_code)]
+    fn count(&self, path: &str) -> usize {
+        self.counts
+            .lock()
+            .map(|counts| counts.get(path).copied().unwrap_or(0))
+            .unwrap_or(0)
+    }
+}
+
+fn serve_one(
+    mut stream: std::net::TcpStream,
+    root: &std::path::Path,
+    counts: &std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>>,
+) -> std::io::Result<()> {
+    use std::io::{BufRead, BufReader, Write};
+
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut request_line = String::new();
+    if reader.read_line(&mut request_line)? == 0 {
+        return Ok(());
+    }
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().unwrap_or("GET").to_string();
+    let target = parts.next().unwrap_or("/").to_string();
+
+    // Read the headers so the client's write completes; the values that
+    // matter (`If-None-Match`) are captured here.
+    let mut content_length = 0usize;
+    let mut if_none_match = String::new();
+    loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line)? == 0 {
+            break;
+        }
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = trimmed.split_once(':') {
+            let name = name.trim().to_ascii_lowercase();
+            let value = value.trim().to_string();
+            match name.as_str() {
+                "content-length" => content_length = value.parse().unwrap_or(0),
+                "if-none-match" => if_none_match = value,
+                _ => {}
+            }
+        }
+    }
+    if content_length > 0 {
+        let mut body = vec![0u8; content_length];
+        use std::io::Read;
+        reader.read_exact(&mut body)?;
+    }
+
+    let (path, query) = match target.split_once('?') {
+        Some((path, query)) => (path.to_string(), query.to_string()),
+        None => (target.clone(), String::new()),
+    };
+    let path = path.trim_start_matches('/').to_string();
+    if let Ok(mut counts) = counts.lock() {
+        *counts.entry(format!("/{path}")).or_insert(0) += 1;
+    }
+
+    let mut respond = |status: &str, headers: &[(&str, String)], body: &[u8]| -> std::io::Result<()> {
+        let mut head = format!(
+            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n",
+            body.len()
+        );
+        for (name, value) in headers {
+            head.push_str(&format!("{name}: {value}\r\n"));
+        }
+        head.push_str("\r\n");
+        stream.write_all(head.as_bytes())?;
+        stream.write_all(body)?;
+        stream.flush()
+    };
+
+    // `/__count?p=/page.html` — how many times that path was requested.
+    if path == "__count" {
+        let wanted = query
+            .split('&')
+            .find_map(|pair| pair.strip_prefix("p="))
+            .map(|p| {
+                let decoded = p.replace("%2F", "/").replace("%2f", "/");
+                if decoded.starts_with('/') {
+                    decoded
+                } else {
+                    format!("/{decoded}")
+                }
+            })
+            .unwrap_or_else(|| "/".to_string());
+        let seen = counts
+            .lock()
+            .map(|counts| counts.get(&wanted).copied().unwrap_or(0))
+            .unwrap_or(0);
+        return respond(
+            "200 OK",
+            &[
+                ("Content-Type", "text/plain".to_string()),
+                ("Cache-Control", "no-store".to_string()),
+            ],
+            seen.to_string().as_bytes(),
+        );
+    }
+
+    // `/__cookie` — a server-set cookie, so `document.cookie` has something
+    // to read back that script did not write itself.
+    if path == "__cookie" {
+        return respond(
+            "200 OK",
+            &[
+                ("Content-Type", "text/plain".to_string()),
+                ("Set-Cookie", "srv=1; Path=/; HttpOnly".to_string()),
+                ("Cache-Control", "no-store".to_string()),
+            ],
+            b"cookie-set",
+        );
+    }
+
+    // `/__cache.txt` — cacheable for a minute, counted, so a page can prove
+    // the second request never reached the server.
+    if path == "__cache.txt" {
+        return respond(
+            "200 OK",
+            &[
+                ("Content-Type", "text/plain; charset=utf-8".to_string()),
+                ("Cache-Control", "max-age=60".to_string()),
+            ],
+            "corpo-cache".as_bytes(),
+        );
+    }
+
+    // `/__etag.txt` — revalidated on every request: `max-age=0` plus an ETag,
+    // so the second request must come back as a 304 and still yield a body.
+    if path == "__etag.txt" {
+        if if_none_match.contains("\"v1\"") {
+            return respond(
+                "304 Not Modified",
+                &[("ETag", "\"v1\"".to_string())],
+                b"",
+            );
+        }
+        return respond(
+            "200 OK",
+            &[
+                ("Content-Type", "text/plain; charset=utf-8".to_string()),
+                ("Cache-Control", "max-age=0".to_string()),
+                ("ETag", "\"v1\"".to_string()),
+            ],
+            "corpo-etag".as_bytes(),
+        );
+    }
+
+    // `/__latin1.txt` — a body that is only valid as windows-1252.
+    if path == "__latin1.txt" {
+        return respond(
+            "200 OK",
+            &[(
+                "Content-Type",
+                "text/plain; charset=windows-1252".to_string(),
+            )],
+            &[0xE7, b'a', b'f', 0xE9],
+        );
+    }
+
+    // `/__json` — a JSON body for `response.json()`.
+    if path == "__json" {
+        return respond(
+            "200 OK",
+            &[
+                ("Content-Type", "application/json".to_string()),
+                ("Cache-Control", "no-store".to_string()),
+            ],
+            br#"{"ok":true,"n":2}"#,
+        );
+    }
+
+    // `/__post` — echoes the request body, so a POST can be verified.
+    if path == "__post" {
+        if method == "POST" {
+            return respond(
+                "200 OK",
+                &[
+                    ("Content-Type", "text/plain; charset=utf-8".to_string()),
+                    ("Cache-Control", "no-store".to_string()),
+                ],
+                format!("recebido:{content_length}").as_bytes(),
+            );
+        }
+        return respond("405 Method Not Allowed", &[], b"");
+    }
+
+    let file = root.join(&path);
+    let Ok(bytes) = std::fs::read(&file) else {
+        return respond(
+            "404 Not Found",
+            &[("Content-Type", "text/plain".to_string())],
+            b"nao encontrado",
+        );
+    };
+    let content_type = match file
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "html" | "htm" => "text/html; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "js" => "text/javascript; charset=utf-8",
+        "json" => "application/json",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "svg" => "image/svg+xml",
+        _ => "text/plain; charset=utf-8",
+    };
+    respond(
+        "200 OK",
+        &[
+            ("Content-Type", content_type.to_string()),
+            // Pages must not be cached: the corpus is re-read every run.
+            ("Cache-Control", "no-store".to_string()),
+        ],
+        &bytes,
+    )
+}
+
 /// Run the compatibility corpus. Each manifest line is
 /// `<file> | key:value | ...`; see `tests/compat/manifest.txt`.
-fn run_compat(dir: &str) -> i32 {
+fn run_compat(dir: &str, serve: bool, verbose: bool) -> i32 {
     let base = std::path::Path::new(dir);
     let manifest = match std::fs::read_to_string(base.join("manifest.txt")) {
         Ok(m) => m,
@@ -1579,6 +1850,20 @@ fn run_compat(dir: &str) -> i32 {
             eprintln!("naro: manifesto não encontrado em {dir}: {err}");
             return 2;
         }
+    };
+    // `--serve` puts the corpus behind a real HTTP origin, which is what
+    // `fetch`, `XMLHttpRequest`, cookies and CORS need to be exercised at all:
+    // a `file://` page has no origin to compare against.
+    let server = if serve {
+        match CompatServer::start(base) {
+            Ok(server) => Some(server),
+            Err(err) => {
+                eprintln!("naro: servidor de compatibilidade indisponível: {err}");
+                return 2;
+            }
+        }
+    } else {
+        None
     };
     let mut pass = 0;
     let mut fail = 0;
@@ -1595,14 +1880,19 @@ fn run_compat(dir: &str) -> i32 {
             Some(f) => f,
             None => continue,
         };
-        let path = std::fs::canonicalize(base.join(file))
-            .unwrap_or_else(|_| base.join(file));
-        let url = match url::Url::from_file_path(&path) {
-            Ok(u) => u.to_string(),
-            Err(_) => {
-                fail += 1;
-                failures.push(format!("{file}: caminho inválido"));
-                continue;
+        let url = match &server {
+            Some(server) => server.url_for(file),
+            None => {
+                let path = std::fs::canonicalize(base.join(file))
+                    .unwrap_or_else(|_| base.join(file));
+                match url::Url::from_file_path(&path) {
+                    Ok(u) => u.to_string(),
+                    Err(_) => {
+                        fail += 1;
+                        failures.push(format!("{file}: caminho inválido"));
+                        continue;
+                    }
+                }
             }
         };
 
@@ -1616,7 +1906,7 @@ fn run_compat(dir: &str) -> i32 {
         engine.set_viewport(1000.0, 700.0);
         let nav = engine.navigate(&url, true);
         if let Some(fetch_url) = nav.fetch {
-            let result = naro_net::fetch(&fetch_url);
+            let result = naro_net::with_session(|net| net.fetch(&fetch_url));
             engine.apply_fetch(nav.generation, result);
         }
 
@@ -1632,6 +1922,19 @@ fn run_compat(dir: &str) -> i32 {
                 "unsupported" => {
                     is_unsupported = true;
                     notes.push(format!("não suportado: {value}"));
+                }
+                "served" => {
+                    // served[:motivo] — the case only means anything behind a
+                    // real origin, so it is skipped (not failed) on `file://`.
+                    if !serve {
+                        is_unsupported = true;
+                        let reason = if value.is_empty() {
+                            "requer --serve"
+                        } else {
+                            value
+                        };
+                        notes.push(format!("não suportado: {reason}"));
+                    }
                 }
                 "text" => {
                     if !engine.has_text(value) {
@@ -1928,6 +2231,15 @@ fn run_compat(dir: &str) -> i32 {
             }
         }
 
+        if verbose {
+            for line in &engine.js.logs {
+                println!("   LOG {file}: {line}");
+            }
+            for line in &engine.js.errors {
+                println!("   ERR {file}: {line}");
+            }
+        }
+
         if is_unsupported {
             unsupported += 1;
             println!("UNSUP  {file}  ({})", notes.join("; "));
@@ -2018,8 +2330,17 @@ fn main() {
     }
 
     if args.first().map(|s| s.as_str()) == Some("--compat") {
-        let dir = args.get(1).cloned().unwrap_or_else(|| "tests/compat".to_string());
-        std::process::exit(run_compat(&dir));
+        let mut dir = "tests/compat".to_string();
+        let mut serve = false;
+        let mut verbose = false;
+        for arg in args.iter().skip(1) {
+            match arg.as_str() {
+                "--serve" => serve = true,
+                "--verbose" => verbose = true,
+                other => dir = other.to_string(),
+            }
+        }
+        std::process::exit(run_compat(&dir, serve, verbose));
     }
 
     if args.first().map(|s| s.as_str()) == Some("--bench") {
@@ -2038,7 +2359,7 @@ fn main() {
         let url = normalize_input(&target);
         let nav = engine.navigate(&url, true);
         let html = match nav.fetch {
-            Some(fetch_url) => match naro_net::fetch(&fetch_url) {
+            Some(fetch_url) => match naro_net::with_session(|net| net.fetch(&fetch_url)) {
                 Ok(page) => page.html,
                 Err(err) => {
                     eprintln!("naro: {err}");

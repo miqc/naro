@@ -9,3 +9,4 @@ ureq.workspace = true
 url.workspace = true
 naro-html.workspace = true
 native-tls = "0.2"
+encoding_rs = "0.8"

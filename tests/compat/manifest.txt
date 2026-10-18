@@ -22,6 +22,8 @@
 #                              visibility border-radius; an unknown PROP fails the check
 #   attr:SEL:NAME=VALUE -> the first element matching SEL has attribute NAME = VALUE
 #                          (e.g. attr:input[type=checkbox]:checked=, attr:a:href=/x)
+#   served[:motivo] -> the case needs a real origin (`--serve`); on file:// it
+#                     is counted as unsupported instead of failing
 #   nojsrerror   -> no JS error recorded
 #   unsupported:reason -> case is known-unsupported, counted separately
 01-plain.html | text:Sem JavaScript | text:Segundo parágrafo. | nojsrerror
@@ -57,3 +59,7 @@
 # 29: superfície de plataforma — estilos computados, eventos, travessia/mutação,
 # URL, TextEncoder, base64, clone, history, readyState e matchMedia.
 29-platform.html | log:cs.color=#0a7d3f | log:cs.size=18px | log:cs.margin=4px | log:cs.unknown="" | log:cs.cssText="" | computed:#p:color=#0a7d3f | computed:#p:font-size=18px | computed:#box:opacity=0.5 | computed:#box:position=relative | log:mq.min=true | log:mq.big=false | log:mq.and=true | log:url.href=https://example.com/a/x?y=1#h | log:url.path=/a/x | log:url.search=?y=1 | log:url.hash=#h | log:url.origin=https://example.com | log:url.relative=false | log:usp=a=9&b=2&c=3,9,true,3 | log:te.len=5 | log:te.round=ção | log:b64=bmFybw==,naro | log:clone=2,3,2 | log:frag.count=2,11 | log:frag.after=2,0,AB | log:tr.first=um | log:tr.last=dois | log:tr.count=2 | log:tr.next=dois | log:tr.prev=um | log:tr.byclass=1 | log:tr.bytag=2 | log:clone.deep=2,host | log:clone.shallow=0 | log:replace=<u>novo</u>,true | log:outer.get=<u>novo</u> | log:outer.set=trocado | log:adjacent=trocado-fim | log:ev.mouse=click,true,true,7,true | log:ev.custom=d1,true | log:ev.key=Enter,true,true | log:hist.state={"page":2} | log:hist.search=?page=2 | log:hist.pop=yes | log:rs=loading | log:rs.later=complete | nojsrerror
+# 30: rede. Só roda com `--serve`, porque `fetch`, cookies e cache HTTP
+# precisam de uma origem http real; em file:// o caso é contado como
+# não suportado em vez de falhar.
+30-net.html | served | log:fetch.status=200,true,OK | log:fetch.url=true | log:fetch.json=true,2 | log:fetch.latin1=çafé | log:xhr.status=200,corpo-cache,4 | log:cache.first=corpo-cache | log:cache.second=corpo-cache | log:cache.count=1 | log:etag.first=corpo-etag | log:etag.second=corpo-etag | log:etag.count=2 | log:cookie.server=cookie-set | log:cookie.visible=cliente=9 | log:cookie.has=true | log:cookie.hidden=true | log:post.body=recebido:7 | log:missing.status=404,false | log:doc.origin=true | nojsrerror

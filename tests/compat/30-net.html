@@ -1,0 +1,92 @@
+<!doctype html><html><head><title>30 Rede</title></head><body>
+<h1>Rede</h1>
+<p id="out">vazio</p>
+<script>
+const log = (key, value) => console.log(key + "=" + value);
+const out = document.getElementById("out");
+
+// --- fetch: status, body and the final URL.
+fetch("__json")
+  .then((res) => {
+    log("fetch.status", res.status + "," + res.ok + "," + res.statusText);
+    log("fetch.url", res.url.indexOf("/__json") >= 0);
+    return res.json();
+  })
+  .then((data) => {
+    log("fetch.json", data.ok + "," + data.n);
+  });
+
+// --- fetch of a legacy charset: windows-1252, not replacement characters.
+fetch("__latin1.txt")
+  .then((res) => res.text())
+  .then((text) => log("fetch.latin1", text));
+
+// --- XMLHttpRequest: synchronous by design, so the result is ready now.
+const xhr = new XMLHttpRequest();
+xhr.open("GET", "__cache.txt");
+xhr.onload = function () {
+  log("xhr.status", xhr.status + "," + xhr.responseText + "," + xhr.readyState);
+};
+xhr.send();
+
+// --- The cache: the first request reaches the server, the second does not.
+fetch("__cache.txt")
+  .then((res) => res.text())
+  .then((first) => {
+    log("cache.first", first);
+    return fetch("__cache.txt");
+  })
+  .then((res) => res.text())
+  .then((second) => {
+    log("cache.second", second);
+    return fetch("__count?p=/__cache.txt");
+  })
+  .then((res) => res.text())
+  .then((count) => {
+    // `xhr` above already made one request; a working cache keeps it at 2.
+    log("cache.count", count);
+  });
+
+// --- Revalidation: `max-age=0` plus an ETag means every request revalidates
+// and a 304 must still produce the original body.
+fetch("__etag.txt")
+  .then((res) => res.text())
+  .then((first) => {
+    log("etag.first", first);
+    return fetch("__etag.txt");
+  })
+  .then((res) => res.text())
+  .then((second) => {
+    log("etag.second", second);
+    return fetch("__count?p=/__etag.txt");
+  })
+  .then((res) => res.text())
+  .then((count) => log("etag.count", count));
+
+// --- Cookies: what script writes it reads back, and a server-set `HttpOnly`
+// cookie reaches the wire but stays invisible to `document.cookie`.
+document.cookie = "cliente=9; path=/";
+fetch("__cookie")
+  .then((res) => res.text())
+  .then((body) => {
+    log("cookie.server", body);
+    log("cookie.visible", document.cookie);
+    log("cookie.has", document.cookie.indexOf("cliente=9") >= 0);
+    log("cookie.hidden", document.cookie.indexOf("srv=") < 0);
+  });
+
+// --- POST through fetch.
+fetch("__post", { method: "POST", body: "a=1&b=2" })
+  .then((res) => res.text())
+  .then((text) => log("post.body", text));
+
+// --- A 404 is a response, not a rejection.
+fetch("nao-existe.html").then((res) => {
+  log("missing.status", res.status + "," + res.ok);
+});
+
+// --- The document itself came over HTTP.
+log("doc.origin", location.origin.indexOf("http://127.0.0.1") === 0);
+out.textContent = "rede ok";
+</script>
+</body></html>
