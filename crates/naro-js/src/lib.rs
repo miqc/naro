@@ -162,6 +162,20 @@ pub enum HistoryOp {
     Go(i64),
 }
 
+/// A form action requested by page script.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FormOp {
+    /// `form.submit()`.
+    Submit,
+    /// `form.reset()`.
+    Reset,
+    /// A `<select>` was asked to open (`element.click()` on a select).
+    OpenSelect,
+    /// `element.click()`: script already dispatched the `click` event, so the
+    /// engine only has to run the default action the browser would.
+    DefaultClick,
+}
+
 struct Dom {
     doc: Document,
     logs: Vec<String>,
@@ -179,6 +193,10 @@ struct Dom {
     ready_state: &'static str,
     /// History changes queued by script, drained by the engine.
     history_ops: Vec<HistoryOp>,
+    /// Form actions queued by script, drained by the engine.
+    form_ops: Vec<(usize, FormOp)>,
+    /// Selected text, published by the engine after every selection change.
+    selection_text: String,
     /// Index of the current entry in the engine's history vector.
     history_index: i64,
     /// Viewport the page was laid out at, for `matchMedia`.
@@ -306,6 +324,16 @@ const BOOTSTRAP: &str = r##"
         return v === null || v === undefined ? null : v;
       },
       setAttribute(n, v) { __naro_set(id, String(n), String(v)); __naro_mutation("attributes", id, String(n), -1, -1); },
+      hasAttribute(n) { return __naro_get(id, String(n)) != null; },
+      toggleAttribute(n, force) {
+        const name = String(n);
+        const has = __naro_get(id, name) !== null;
+        const want = force === undefined ? !has : !!force;
+        if (want && !has) __naro_set(id, name, "");
+        if (!want && has) __naro_remove_attr(id, name);
+        __naro_mutation("attributes", id, name, -1, -1);
+        return want;
+      },
       removeAttribute(n) { __naro_remove_attr(id, String(n)); __naro_mutation("attributes", id, String(n), -1, -1); },
       appendChild(child) {
         __naro_append(id, child.__id);
@@ -351,7 +379,21 @@ const BOOTSTRAP: &str = r##"
         const path = [];
         let cur = id;
         while (cur >= 0) { path.push(cur); cur = __naro_parent(cur); }
-        __naro_dispatch(id, new MouseEvent("click", { bubbles: true, cancelable: true }), path);
+        const ev = new MouseEvent("click", { bubbles: true, cancelable: true });
+        __naro_dispatch(id, ev, path);
+        // A programmatic click runs the same default action a real click does.
+        // A toggle is applied here, synchronously, so `el.checked` is already
+        // true on the next statement; anything that needs the engine (submit,
+        // reset, a select popup) is queued for its next flush.
+        if (ev.defaultPrevented) return;
+        if (__naro_toggle(id)) {
+          const inputEv = new InputEvent("input", { bubbles: true });
+          __naro_dispatch(id, inputEv, path);
+          const changeEv = new Event("change", { bubbles: true });
+          __naro_dispatch(id, changeEv, path);
+          return;
+        }
+        __naro_form_op(id, "click");
       },
       get tagName() { return __naro_tag(id); },
       get nodeName() {
@@ -520,6 +562,36 @@ const BOOTSTRAP: &str = r##"
         const host = pos === "beforebegin" || pos === "afterend" ? __naro_parent(id) : id;
         if (host < 0) return;
         __naro_mutation("childList", host, null, node, -1);
+      },
+      // `form.submit()` skips validation and the `submit` event, as in the
+      // DOM; `requestSubmit()` would fire it, which this engine does not model.
+      submit() { __naro_form_op(id, "submit"); },
+      reset() { __naro_form_op(id, "reset"); },
+      get elements() {
+        return __naro_elements_by_tag_name(id, "input")
+          .concat(__naro_elements_by_tag_name(id, "select"))
+          .concat(__naro_elements_by_tag_name(id, "textarea"))
+          .concat(__naro_elements_by_tag_name(id, "button"))
+          .map(wrap);
+      },
+      // A `<select>` opens its popup through the same path a click takes.
+      get selectedIndex() {
+        const options = __naro_elements_by_tag_name(id, "option").map(wrap);
+        return options.findIndex((o) => o.hasAttribute("selected"));
+      },
+      get options() { return __naro_elements_by_tag_name(id, "option").map(wrap); },
+      get value() {
+        const v = __naro_value(id);
+        if (v !== null && v !== "") return v;
+        const options = __naro_elements_by_tag_name(id, "option").map(wrap);
+        const chosen = options.find((o) => o.hasAttribute("selected")) || options[0];
+        return chosen ? (chosen.getAttribute("value") || chosen.textContent) : "";
+      },
+      get checked() { return __naro_get(id, "checked") != null; },
+      set checked(v) {
+        if (v) __naro_set(id, "checked", "checked");
+        else __naro_remove_attr(id, "checked");
+        __naro_mutation("attributes", id, "checked", -1, -1);
       },
       get dataset() {
         // `data-user-id` <-> `userId`, per the DOMStringMap rules.
@@ -1065,6 +1137,29 @@ const BOOTSTRAP: &str = r##"
       go(delta) { __naro_history_travel(Number(delta) || 0); popState(); }
     };
   })();
+
+  // `getSelection()` reports the engine's selection as one string. A
+  // `Range` object is not modelled: pages that only read `toString()` — the
+  // overwhelming majority — work, and a page that wants `anchorNode` gets
+  // `null` instead of a wrong answer.
+  globalThis.getSelection = function () {
+    const text = () => __naro_selection();
+    return {
+      toString: text,
+      isCollapsed: () => text().length === 0,
+      rangeCount: 0,
+      anchorNode: null,
+      focusNode: null,
+      anchorOffset: 0,
+      focusOffset: 0,
+      removeAllRanges: function () {},
+      addRange: function () {},
+      getRangeAt: function () { return null; },
+      collapse: function () {},
+      selectAllChildren: function () {}
+    };
+  };
+  globalThis.document.getSelection = globalThis.getSelection;
 
   // `JSON` cannot carry functions, Dates or cyclic graphs; documented
   // limitation of the only deep clone available without a structured-clone
@@ -1656,6 +1751,8 @@ impl JsSession {
             computed,
             ready_state: "loading",
             history_ops: Vec::new(),
+            form_ops: Vec::new(),
+            selection_text: String::new(),
             history_index: 0,
             viewport: (1000.0, 700.0),
             url: url.to_string(),
@@ -1902,6 +1999,16 @@ impl JsSession {
         std::mem::take(&mut self.dom.borrow_mut().history_ops)
     }
 
+    /// Publish the current selection text, for `window.getSelection()`.
+    pub fn set_selection_text(&self, text: &str) {
+        self.dom.borrow_mut().selection_text = text.to_string();
+    }
+
+    /// Form actions page script queued since the last drain.
+    pub fn take_form_ops(&self) -> Vec<(usize, FormOp)> {
+        std::mem::take(&mut self.dom.borrow_mut().form_ops)
+    }
+
     /// Pending invalidation produced by DOM mutations.
     pub fn invalidation(&self) -> Invalidation {
         self.dom.borrow().invalidation
@@ -1916,6 +2023,43 @@ impl JsSession {
     /// Mirror a host-side attribute change into the live JavaScript DOM.
     pub fn set_attribute(&self, node: NodeId, name: &str, value: &str) {
         self.dom.borrow_mut().doc.set_attr(node, name, value);
+    }
+
+    /// Read an attribute from the live JavaScript DOM (diagnostics).
+    pub fn attribute(&self, node: NodeId, name: &str) -> Option<String> {
+        self.dom
+            .borrow()
+            .doc
+            .attr(node, name)
+            .map(|v| v.to_string())
+    }
+
+    /// Replace the live document, keeping the realm alive.
+    ///
+    /// The engine keeps its own snapshot for layout; when it applies an action
+    /// that changed the tree (a reset, a select choice), it hands the result
+    /// back here so the next script statement reads the new tree.
+    pub fn set_document(&self, doc: Document) {
+        self.dom.borrow_mut().doc = doc;
+    }
+
+    /// Flip a checkbox or radio in the live DOM. Returns whether anything
+    /// changed, so the caller can dispatch `input`/`change` exactly once.
+    pub fn toggle_checked(&self, node: NodeId) -> bool {
+        let mut dom = self.dom.borrow_mut();
+        let changed = dom.doc.toggle_checked(node);
+        if changed {
+            dom.invalidation.mark_style();
+        }
+        changed
+    }
+
+    /// Mirror a host-side attribute removal into the live JavaScript DOM.
+    pub fn remove_attribute(&self, node: NodeId, name: &str) {
+        let mut dom = self.dom.borrow_mut();
+        if let NodeData::Element { attrs, .. } = &mut dom.doc.nodes[node].data {
+            attrs.retain(|(n, _)| n != name);
+        }
     }
 
     fn root_id(&self) -> usize {
@@ -2911,6 +3055,48 @@ fn register(ctx: &rquickjs::Ctx<'_>, dom: &Rc<RefCell<Dom>>) -> rquickjs::Result
                 }
             },
         )?,
+    )?;
+
+    let d = dom.clone();
+    globals.set(
+        "__naro_toggle",
+        Function::new(ctx.clone(), move |id: i64| -> bool {
+            if id < 0 {
+                return false;
+            }
+            let mut dom = d.borrow_mut();
+            let changed = dom.doc.toggle_checked(id as usize);
+            if changed {
+                // The engine restyles from its next snapshot; marking it here
+                // is what makes `:checked` take effect without a second click.
+                dom.invalidation.mark_style();
+            }
+            changed
+        })?,
+    )?;
+
+    let d = dom.clone();
+    let d = dom.clone();
+    globals.set(
+        "__naro_selection",
+        Function::new(ctx.clone(), move || -> String { d.borrow().selection_text.clone() })?,
+    )?;
+
+    let d = dom.clone();
+    globals.set(
+        "__naro_form_op",
+        Function::new(ctx.clone(), move |id: i64, op: String| {
+            if id < 0 {
+                return;
+            }
+            let op = match op.as_str() {
+                "reset" => FormOp::Reset,
+                "open-select" => FormOp::OpenSelect,
+                "click" => FormOp::DefaultClick,
+                _ => FormOp::Submit,
+            };
+            d.borrow_mut().form_ops.push((id as usize, op));
+        })?,
     )?;
 
     let d = dom.clone();

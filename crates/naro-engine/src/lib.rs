@@ -48,7 +48,7 @@ use naro_image::{decode, SharedImage};
 use naro_js::{ElementBox, Invalidation, ScriptOutcome};
 use naro_paint::Canvas;
 use std::collections::HashMap;
-use naro_text::FontSet;
+use naro_text::{FontSet, TextMeasure};
 
 pub const START_URL: &str = "naro://start";
 /// Images kept decoded per session; bounded so long browsing cannot grow it.
@@ -95,6 +95,69 @@ pub struct Navigation {
     pub fetch: Option<String>,
 }
 
+/// A navigation a form asked for.
+///
+/// `GET` carries the query in `url`; `POST` carries an
+/// `application/x-www-form-urlencoded` body instead, so the two cannot be
+/// confused by a caller that only looks at the URL.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PendingNavigation {
+    pub url: String,
+    pub method: FormMethod,
+    pub body: Option<String>,
+}
+
+/// A caret position inside the laid-out text: which run, and which byte of
+/// that run.
+///
+/// The run index, not the node, is what identifies a position: one node's text
+/// is split into several runs when it wraps, so a `(node, byte)` pair could
+/// name two different places.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TextPos {
+    pub run: usize,
+    pub byte: usize,
+    /// DOM node the run belongs to.
+    pub node: NodeId,
+}
+
+/// A text selection, anchor to focus.
+///
+/// Kept as two positions rather than a range so a drag in either direction
+/// works, and so `getSelection()` can report `anchorNode`/`focusNode`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Selection {
+    pub anchor: TextPos,
+    pub focus: TextPos,
+}
+
+impl Selection {
+    /// The two ends in document order.
+    fn ordered(&self) -> (TextPos, TextPos) {
+        if (self.anchor.run, self.anchor.byte) <= (self.focus.run, self.focus.byte) {
+            (self.anchor, self.focus)
+        } else {
+            (self.focus, self.anchor)
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.anchor == self.focus
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FormMethod {
+    Get,
+    Post,
+}
+
+impl PendingNavigation {
+    pub fn is_post(&self) -> bool {
+        self.method == FormMethod::Post
+    }
+}
+
 pub struct Engine {
     pub fonts: FontSet,
     pub scale: f32,
@@ -130,9 +193,13 @@ pub struct Engine {
     pub relayout_count: u32,
     /// How many times only the paint attributes were refreshed.
     pub repaint_count: u32,
-    /// URL a form submission asked for, consumed by the caller that owns
-    /// navigation (the window loop or the headless driver).
-    pending_nav: Option<String>,
+    /// Navigation a form submission asked for, consumed by the caller that
+    /// owns navigation (the window loop or the headless driver).
+    pending_nav: Option<PendingNavigation>,
+    /// `<select>` whose popup is open, if any. The popup itself is chrome.
+    select_open: Option<usize>,
+    /// Text selection, if any.
+    pub selection: Option<Selection>,
     /// Last parsed `<style>` text, so a load or a restyle that did not change
     /// it does not parse the whole sheet again.
     sheet_cache: naro_css::SheetCache,
@@ -167,6 +234,8 @@ impl Engine {
             relayout_count: 0,
             repaint_count: 0,
             pending_nav: None,
+            select_open: None,
+            selection: None,
             sheet_cache: naro_css::SheetCache::default(),
         };
         // Callers decide what to load; nothing is parsed or laid out here.
@@ -409,6 +478,10 @@ impl Engine {
             session.set_history_index(self.history_index as i64);
             session.set_viewport(self.viewport_width, self.viewport_height);
         }
+        // Load-time script may already have asked for a toggle, a submit or a
+        // history change; those have to reach the tree before it is styled,
+        // because a checkbox that script clicked is styled as checked.
+        self.drain_script_ops();
         let doc = match &self.js_session {
             Some(session) => session.snapshot(),
             None => return,
@@ -615,6 +688,55 @@ p {{ margin: 8px 0; line-height: 1.5; }}
         }
         canvas.set_clip(content);
 
+        // A checked checkbox and a selected radio draw their mark on top of
+        // the box the block pass already painted.
+        if let Some(doc) = &self.doc {
+            for block in &layout.blocks {
+                if block.tag != "input" || !block.paint {
+                    continue;
+                }
+                let kind = doc
+                    .attr(block.node, "type")
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                if kind != "checkbox" && kind != "radio" {
+                    continue;
+                }
+                if doc.attr(block.node, "checked").is_none() {
+                    continue;
+                }
+                let x = block.rect.x + content.x;
+                let y = block.rect.y - scroll + content.y;
+                let w = block.rect.w;
+                let h = block.rect.h;
+                if y + h < content.y || y > content.y + content.h {
+                    continue;
+                }
+                if kind == "radio" {
+                    // A filled dot, centred, at the same weight as the mark.
+                    let radius = (w.min(h) / 2.0 - 3.0).max(1.5);
+                    canvas.fill_round_rect(
+                        x + w / 2.0 - radius,
+                        y + h / 2.0 - radius,
+                        radius * 2.0,
+                        radius * 2.0,
+                        radius,
+                        Color::rgb(0x1a, 0x1a, 0x1a),
+                    );
+                } else {
+                    // A tick: two strokes, scaled to the box so a CSS-sized
+                    // checkbox still gets a mark that fits.
+                    let pad = (w.min(h) * 0.22).max(1.5);
+                    let points = [
+                        (x + pad, y + h * 0.52),
+                        (x + w * 0.42, y + h - pad),
+                        (x + w - pad, y + pad),
+                    ];
+                    canvas.stroke_path(&points, (w.min(h) * 0.14).max(1.2), Color::rgb(0x1a, 0x1a, 0x1a));
+                }
+            }
+        }
+
         for image in &layout.images {
             let y = image.rect.y - scroll + content.y;
             if y > content.y + content.h || y + image.rect.h < content.y {
@@ -638,6 +760,22 @@ p {{ margin: 8px 0; line-height: 1.5; }}
             shape.origin.0 += content.x;
             shape.origin.1 += content.y - scroll;
             canvas.fill_svg_shape(&shape);
+        }
+
+        // The selection highlight goes under the glyphs, so the text stays
+        // readable, and it is clipped to the content box like everything else.
+        for rect in self.selection_rects() {
+            let y = rect.y - scroll + content.y;
+            if y + rect.h < content.y || y > content.y + content.h {
+                continue;
+            }
+            canvas.fill_rect(
+                rect.x + content.x,
+                y,
+                rect.w,
+                rect.h,
+                Color::rgb(0xb3, 0xd4, 0xfc),
+            );
         }
 
         for run in &layout.text_runs {
@@ -672,6 +810,176 @@ p {{ margin: 8px 0; line-height: 1.5; }}
         canvas.reset_clip();
     }
 
+    /// The text position nearest `(x, y)` in page coordinates.
+    ///
+    /// Lines are found by baseline band, then the byte is found by measuring
+    /// prefixes with the same font the paint pass used, so the caret lands
+    /// between the two characters it was drawn between.
+    pub fn hit_text(&self, x: f32, y: f32) -> Option<TextPos> {
+        let layout = self.layout.as_ref()?;
+        let mut best: Option<(f32, usize)> = None;
+        for (index, run) in layout.text_runs.iter().enumerate() {
+            if !run.paint {
+                continue;
+            }
+            // A line's band: from the ascender to just below the baseline.
+            let top = run.baseline - run.size;
+            let bottom = run.baseline + run.size * 0.35;
+            if y < top || y > bottom {
+                continue;
+            }
+            let text = run.text(layout);
+            let width = self.fonts.measure(text, run.size, run.bold);
+            // Distance to the run's horizontal extent; a click to the right of
+            // a line still lands at its end.
+            let distance = if x < run.x {
+                run.x - x
+            } else if x > run.x + width {
+                x - (run.x + width)
+            } else {
+                0.0
+            };
+            let vertical = (y - (run.baseline - run.size * 0.35)).abs();
+            let score = distance * 4.0 + vertical;
+            if best.map(|(b, _)| score < b).unwrap_or(true) {
+                best = Some((score, index));
+            }
+        }
+        let (_, index) = best?;
+        let run = &layout.text_runs[index];
+        let text = run.text(layout);
+        let mut byte = 0usize;
+        let mut best_delta = f32::INFINITY;
+        for (offset, _) in text.char_indices().chain(std::iter::once((text.len(), '\0'))) {
+            let prefix = &text[..offset];
+            let width = self.fonts.measure(prefix, run.size, run.bold);
+            let delta = (run.x + width - x).abs();
+            if delta < best_delta {
+                best_delta = delta;
+                byte = offset;
+            }
+        }
+        Some(TextPos {
+            run: index,
+            byte,
+            node: run.node,
+        })
+    }
+
+    /// Start a selection at `(x, y)`, if there is text there.
+    pub fn begin_selection(&mut self, x: f32, y: f32) -> bool {
+        match self.hit_text(x, y) {
+            Some(pos) => {
+                self.selection = Some(Selection {
+                    anchor: pos,
+                    focus: pos,
+                });
+                self.sync_selection();
+                true
+            }
+            None => {
+                self.selection = None;
+                self.sync_selection();
+                false
+            }
+        }
+    }
+
+    /// Move the focus end of the selection, keeping the anchor.
+    pub fn extend_selection(&mut self, x: f32, y: f32) {
+        let Some(anchor) = self.selection.map(|s| s.anchor) else {
+            return;
+        };
+        if let Some(pos) = self.hit_text(x, y) {
+            self.selection = Some(Selection { anchor, focus: pos });
+            self.sync_selection();
+        }
+    }
+
+    pub fn set_selection(&mut self, anchor: (f32, f32), focus: (f32, f32)) -> bool {
+        let Some(start) = self.hit_text(anchor.0, anchor.1) else {
+            self.selection = None;
+            return false;
+        };
+        let end = self.hit_text(focus.0, focus.1).unwrap_or(start);
+        self.selection = Some(Selection {
+            anchor: start,
+            focus: end,
+        });
+        self.sync_selection();
+        true
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.selection = None;
+        self.sync_selection();
+    }
+
+    /// Publish the selected text to script, so `getSelection()` agrees with
+    /// what is painted.
+    fn sync_selection(&self) {
+        if let Some(session) = &self.js_session {
+            session.set_selection_text(&self.selection_text());
+        }
+    }
+
+    /// The selected text, runs joined in document order.
+    pub fn selection_text(&self) -> String {
+        let Some(selection) = self.selection else {
+            return String::new();
+        };
+        let Some(layout) = self.layout.as_ref() else {
+            return String::new();
+        };
+        let (start, end) = selection.ordered();
+        let mut out = String::new();
+        for index in start.run..=end.run.min(layout.text_runs.len().saturating_sub(1)) {
+            let run = &layout.text_runs[index];
+            let text = run.text(layout);
+            let from = if index == start.run { start.byte } else { 0 };
+            let to = if index == end.run { end.byte } else { text.len() };
+            let from = from.min(text.len());
+            let to = to.min(text.len()).max(from);
+            if !out.is_empty() && from == 0 && !out.ends_with(' ') {
+                out.push(' ');
+            }
+            out.push_str(&text[from..to]);
+        }
+        out
+    }
+
+    /// One rectangle per selected run segment, in page coordinates.
+    pub fn selection_rects(&self) -> Vec<Rect> {
+        let Some(selection) = self.selection else {
+            return Vec::new();
+        };
+        let Some(layout) = self.layout.as_ref() else {
+            return Vec::new();
+        };
+        let (start, end) = selection.ordered();
+        let mut out = Vec::new();
+        for index in start.run..=end.run.min(layout.text_runs.len().saturating_sub(1)) {
+            let run = &layout.text_runs[index];
+            let text = run.text(layout);
+            let from = if index == start.run { start.byte } else { 0 };
+            let to = if index == end.run { end.byte } else { text.len() };
+            let from = from.min(text.len());
+            let to = to.min(text.len()).max(from);
+            if from == to {
+                continue;
+            }
+            let x0 = run.x + self.fonts.measure(&text[..from], run.size, run.bold);
+            let x1 = run.x + self.fonts.measure(&text[..to], run.size, run.bold);
+            out.push(Rect {
+                x: x0,
+                y: run.baseline - run.size * 0.95,
+                w: (x1 - x0).max(1.0),
+                h: run.size * 1.2,
+            });
+        }
+        out
+    }
+
     /// Deepest laid-out element under `(x, y)` in page coordinates.
     pub fn hit_node(&self, page_x: f32, page_y: f32) -> Option<usize> {
         let layout = self.layout.as_ref()?;
@@ -700,7 +1008,7 @@ p {{ margin: 8px 0; line-height: 1.5; }}
         };
         // Form controls take focus before the click is dispatched.
         let is_control = match self.doc.as_ref().and_then(|d| d.tag(node)) {
-            Some("input") | Some("textarea") | Some("button") => {
+            Some("input") | Some("textarea") | Some("button") | Some("select") => {
                 self.focus_node(node);
                 true
             }
@@ -718,12 +1026,40 @@ p {{ margin: 8px 0; line-height: 1.5; }}
         out.merge(session.drain_microtasks());
         out.merge(session.run_timers(20));
         self.flush();
-        // The default action of a submit control runs after the handlers, and
-        // only when no handler took the click.
-        if called == 0 && self.is_submit_control(node) {
-            self.submit_from(node);
+        // Default actions run after the handlers, and only when no handler
+        // took the click.
+        if called == 0 {
+            self.default_click(node);
         }
         (out, called > 0 || is_control)
+    }
+
+    /// What a click does when no handler took it: flip a checkbox, check a
+    /// radio, submit a form, activate a label, or open a select.
+    ///
+    /// Shared by the real click path and by `element.click()` from script, so
+    /// the two cannot diverge.
+    pub fn default_click(&mut self, node: usize) {
+        if self.is_toggle_control(node) {
+            self.toggle_control(node);
+            return;
+        }
+        if self.is_submit_control(node) {
+            self.submit_from(node);
+            return;
+        }
+        if let Some(target) = self.label_target(node) {
+            // Clicking a `<label>` activates the control it names, which is
+            // the only way a bare `<label for>` works.
+            self.focus_node(target);
+            if self.is_toggle_control(target) {
+                self.toggle_control(target);
+            }
+            return;
+        }
+        if self.doc.as_ref().and_then(|d| d.tag(node)) == Some("select") {
+            self.open_select(node);
+        }
     }
 
     /// Run pending JavaScript work and apply the resulting invalidation.
@@ -770,17 +1106,59 @@ p {{ margin: 8px 0; line-height: 1.5; }}
     /// many mutations in the same script cost one rebuild; calling it again
     /// with nothing pending is a no-op, which is what keeps a MutationObserver
     /// callback from looping.
-    pub fn flush(&mut self) -> bool {
-        // `history.pushState` and friends are queued by script and applied
-        // here, before the invalidation work: a pushState alone changes the
-        // URL without touching the document.
-        let ops = match &self.js_session {
+    /// Apply everything script asked the engine to do.
+    ///
+    /// `history.pushState`, `form.submit()`, `form.reset()` and
+    /// `element.click()` are queued because script cannot reach the engine.
+    /// The queue is emptied first, so an action that itself dispatches an
+    /// event cannot re-enter this loop over the same batch.
+    fn drain_script_ops(&mut self) {
+        // The live tree is the session's; `self.doc` is the snapshot layout
+        // reads. An op that mutates the document must act on a snapshot that
+        // exists, and every change is mirrored back into the session so the
+        // next script statement sees it.
+        if let Some(session) = &self.js_session {
+            self.doc = Some(session.snapshot());
+        }
+        let history = match &self.js_session {
             Some(session) => session.take_history_ops(),
             None => Vec::new(),
         };
-        for op in ops {
+        for op in history {
             self.apply_history_op(op);
         }
+        let forms = match &self.js_session {
+            Some(session) => session.take_form_ops(),
+            None => Vec::new(),
+        };
+        for (node, op) in forms {
+            match op {
+                naro_js::FormOp::Submit => self.submit_form(node),
+                naro_js::FormOp::Reset => self.reset_form(node),
+                naro_js::FormOp::OpenSelect => {
+                    self.open_select(node);
+                }
+                naro_js::FormOp::DefaultClick => self.default_click(node),
+            }
+        }
+        // Whatever the ops changed has to reach the live tree, or the next
+        // script statement would read the pre-op document.
+        self.sync_session();
+    }
+
+    /// Hand the engine's document back to the live session.
+    ///
+    /// The session owns the tree script sees; the engine owns the snapshot it
+    /// styles. Every host-side mutation goes through here so the two cannot
+    /// drift apart.
+    fn sync_session(&self) {
+        if let (Some(session), Some(doc)) = (&self.js_session, &self.doc) {
+            session.set_document(doc.clone());
+        }
+    }
+
+    pub fn flush(&mut self) -> bool {
+        self.drain_script_ops();
         let mut invalidation = std::mem::take(&mut self.dirty);
         if let Some(session) = &self.js_session {
             invalidation.merge(session.take_invalidation());
@@ -1034,11 +1412,11 @@ p {{ margin: 8px 0; line-height: 1.5; }}
         self.focus_node(controls[next]);
     }
 
-    /// URL the page asked to navigate to through a form submission.
+    /// Navigation the page asked for through a form submission.
     ///
     /// `Engine` never navigates on its own; the window loop and the headless
     /// driver own that, so the request is handed over instead of applied.
-    pub fn take_pending_nav(&mut self) -> Option<String> {
+    pub fn take_pending_nav(&mut self) -> Option<PendingNavigation> {
         self.pending_nav.take()
     }
 
@@ -1058,10 +1436,12 @@ p {{ margin: 8px 0; line-height: 1.5; }}
 
     /// Submit the form that contains `node`, if any.
     ///
-    /// Builds a `GET` query from the successful controls, the way a browser
-    /// does: only named controls count, `disabled` ones are skipped and the
-    /// submit button itself is not included. A `POST` form falls back to `GET`
-    /// because the engine has no request-body path yet.
+    /// Builds the successful-control set the way a browser does: only named
+    /// controls count, `disabled` ones are skipped, an unchecked checkbox or
+    /// radio contributes nothing, a checked one contributes its `value`
+    /// (`on` when absent), and a `<select>` contributes its chosen option.
+    /// The submit button itself is never included. `method=post` becomes an
+    /// `application/x-www-form-urlencoded` body instead of a query.
     fn submit_from(&mut self, node: usize) {
         let Some(doc) = &self.doc else { return };
         let mut current = Some(node);
@@ -1074,6 +1454,15 @@ p {{ margin: 8px 0; line-height: 1.5; }}
             current = doc.node(id).parent;
         }
         let Some(form) = form else { return };
+        let method = match doc
+            .attr(form, "method")
+            .unwrap_or("get")
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "post" => FormMethod::Post,
+            _ => FormMethod::Get,
+        };
         let action = doc.attr(form, "action").unwrap_or("").trim().to_string();
         let target = if action.is_empty() {
             self.display_url.clone()
@@ -1102,11 +1491,28 @@ p {{ margin: 8px 0; line-height: 1.5; }}
                         "submit" | "reset" | "button" | "image" | "file"
                     );
                     if usable {
+                        let toggle = matches!(kind.as_str(), "checkbox" | "radio");
+                        let checked = doc.attr(id, "checked").is_some();
+                        if toggle && !checked {
+                            continue;
+                        }
                         if let Some(name) = doc.attr(id, "name") {
                             if !name.is_empty() {
-                                let value = doc.attr(id, "value").unwrap_or("").to_string();
+                                let value = if toggle {
+                                    doc.attr(id, "value").unwrap_or("on").to_string()
+                                } else {
+                                    doc.attr(id, "value").unwrap_or("").to_string()
+                                };
                                 push_query(&mut query, name, &value);
                             }
+                        }
+                    }
+                }
+                Some("select") => {
+                    if let Some(name) = doc.attr(id, "name") {
+                        if !name.is_empty() && doc.attr(id, "disabled").is_none() {
+                            let value = self.select_value(id);
+                            push_query(&mut query, name, &value);
                         }
                     }
                 }
@@ -1124,13 +1530,273 @@ p {{ margin: 8px 0; line-height: 1.5; }}
                 stack.push(child);
             }
         }
-        let separator = if target.contains('?') { '&' } else { '?' };
-        let url = if query.is_empty() {
-            target
-        } else {
-            format!("{target}{separator}{query}")
+        self.pending_nav = Some(match method {
+            // A GET replaces the query string; a POST keeps the action's own
+            // query and sends the controls in the body.
+            FormMethod::Get => {
+                let separator = if target.contains('?') { '&' } else { '?' };
+                let url = if query.is_empty() {
+                    target
+                } else {
+                    format!("{target}{separator}{query}")
+                };
+                PendingNavigation {
+                    url,
+                    method: FormMethod::Get,
+                    body: None,
+                }
+            }
+            FormMethod::Post => PendingNavigation {
+                url: target,
+                method: FormMethod::Post,
+                body: Some(query),
+            },
+        });
+    }
+
+    /// True for a control whose click flips its own state.
+    fn is_toggle_control(&self, node: usize) -> bool {
+        let Some(doc) = &self.doc else { return false };
+        if doc.tag(node) != Some("input") {
+            return false;
+        }
+        matches!(
+            doc.attr(node, "type").unwrap_or("").to_ascii_lowercase().as_str(),
+            "checkbox" | "radio"
+        )
+    }
+
+    /// Flip a checkbox, or check a radio and uncheck its siblings.
+    ///
+    /// The state is the `checked` attribute, so the cascade (`:checked`), the
+    /// paint pass and script all read the same thing. A radio cannot be
+    /// unchecked by clicking it, as in a browser.
+    pub fn toggle_control(&mut self, node: usize) {
+        // One implementation of the state rule, in `naro-html`: the engine
+        // applies it to the live tree when there is a session, and to its own
+        // snapshot when there is none.
+        let changed = match &self.js_session {
+            Some(session) => {
+                let changed = session.toggle_checked(node);
+                // The session owns the live tree; refresh the snapshot so
+                // layout and paint see the same `checked` attribute.
+                self.doc = Some(session.snapshot());
+                changed
+            }
+            None => self
+                .doc
+                .as_mut()
+                .map(|doc| doc.toggle_checked(node))
+                .unwrap_or(false),
         };
-        self.pending_nav = Some(url);
+        if !changed {
+            return;
+        }
+        self.dirty.mark_style();
+        // Script sees the new state through `input` and `change`, in that
+        // order, exactly as a browser does.
+        self.emit(node, "input");
+        self.emit(node, "change");
+    }
+
+    /// Open a `<select>`: returns its option list for the caller to draw.
+    ///
+    /// The engine owns the geometry and the state; the window loop owns the
+    /// popup, because it is chrome and not part of the page.
+    pub fn open_select(&mut self, node: usize) -> Vec<(NodeId, String, bool)> {
+        let Some(doc) = &self.doc else { return Vec::new() };
+        if doc.tag(node) != Some("select") {
+            return Vec::new();
+        }
+        self.focus_node(node);
+        self.select_open = Some(node);
+        self.select_options(node)
+    }
+
+    pub fn close_select(&mut self) {
+        self.select_open = None;
+    }
+
+    pub fn is_select_open(&self) -> Option<usize> {
+        self.select_open
+    }
+
+    /// Every option of `node`, with its label and whether it is selected.
+    pub fn select_options(&self, node: usize) -> Vec<(NodeId, String, bool)> {
+        let Some(doc) = &self.doc else { return Vec::new() };
+        let selected = selected_option(doc, node);
+        let mut out = Vec::new();
+        let mut stack: Vec<NodeId> = doc.children(node).iter().rev().copied().collect();
+        while let Some(id) = stack.pop() {
+            if doc.tag(id) == Some("option") {
+                let label = doc
+                    .attr(id, "label")
+                    .map(|l| l.to_string())
+                    .unwrap_or_else(|| doc.text_content(id).trim().to_string());
+                out.push((id, label, Some(id) == selected));
+                continue;
+            }
+            for &child in doc.children(id).iter().rev() {
+                stack.push(child);
+            }
+        }
+        out
+    }
+
+    /// The box of a `<select>`, so the popup can hang from it.
+    pub fn select_rect(&self, node: usize) -> Option<Rect> {
+        self.layout
+            .as_ref()?
+            .blocks
+            .iter()
+            .find(|b| b.node == node)
+            .map(|b| b.rect)
+    }
+
+    /// Choose an option: mark it `selected`, drop the others, close, notify.
+    pub fn choose_option(&mut self, select: usize, option: NodeId) {
+        let Some(doc) = &mut self.doc else { return };
+        if doc.tag(select) != Some("select") || doc.tag(option) != Some("option") {
+            return;
+        }
+        let mut options = Vec::new();
+        let mut stack: Vec<NodeId> = doc.children(select).iter().rev().copied().collect();
+        while let Some(id) = stack.pop() {
+            if doc.tag(id) == Some("option") {
+                options.push(id);
+                continue;
+            }
+            for &child in doc.children(id).iter().rev() {
+                stack.push(child);
+            }
+        }
+        for id in options {
+            if id == option {
+                doc.set_attr(id, "selected", "selected");
+            } else {
+                remove_attr(doc, id, "selected");
+            }
+        }
+        self.select_open = None;
+        // A closed select paints the chosen label, which is a layout text
+        // run, so the choice needs a relayout and not just a repaint.
+        self.dirty.mark_layout();
+        // Push the new tree into the session before notifying: `flush` (which
+        // `emit` runs) re-reads the session, and would otherwise undo this.
+        self.sync_session();
+        self.emit(select, "input");
+        self.emit(select, "change");
+    }
+
+    /// The value a `<select>` would submit.
+    pub fn select_value(&self, node: usize) -> String {
+        let Some(doc) = &self.doc else { return String::new() };
+        match selected_option(doc, node) {
+            Some(option) => doc
+                .attr(option, "value")
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| doc.text_content(option).trim().to_string()),
+            None => String::new(),
+        }
+    }
+
+    /// Submit a form from script, bypassing the click path.
+    pub fn submit_form(&mut self, form: usize) {
+        self.submit_from(form);
+    }
+
+    /// Reset a form: every control returns to the value it was parsed with.
+    pub fn reset_form(&mut self, form: usize) {
+        let Some(doc) = &mut self.doc else { return };
+        let mut stack = vec![form];
+        while let Some(id) = stack.pop() {
+            match doc.tag(id) {
+                Some("input") => {
+                    let kind = doc.attr(id, "type").unwrap_or("text").to_ascii_lowercase();
+                    if matches!(kind.as_str(), "checkbox" | "radio") {
+                        if doc.attr(id, "checked-default").is_some() {
+                            doc.set_attr(id, "checked", "checked");
+                        } else {
+                            remove_attr(doc, id, "checked");
+                        }
+                    } else {
+                        let initial = doc
+                            .attr(id, "value-default")
+                            .map(|v| v.to_string())
+                            .unwrap_or_default();
+                        doc.set_attr(id, "value", &initial);
+                    }
+                }
+                Some("textarea") => {
+                    let initial = doc
+                        .attr(id, "value-default")
+                        .map(|v| v.to_string())
+                        .unwrap_or_default();
+                    doc.set_attr(id, "value", &initial);
+                }
+                Some("select") => {
+                    let mut options = Vec::new();
+                    let mut inner: Vec<NodeId> = doc.children(id).iter().rev().copied().collect();
+                    while let Some(option) = inner.pop() {
+                        if doc.tag(option) == Some("option") {
+                            options.push(option);
+                            continue;
+                        }
+                        for &child in doc.children(option).iter().rev() {
+                            inner.push(child);
+                        }
+                    }
+                    let mut restored = false;
+                    for option in options {
+                        let initial = doc.attr(option, "selected-default").is_some();
+                        if initial && !restored {
+                            doc.set_attr(option, "selected", "selected");
+                            restored = true;
+                        } else {
+                            remove_attr(doc, option, "selected");
+                        }
+                    }
+                }
+                _ => {}
+            }
+            for &child in doc.children(id).iter().rev() {
+                stack.push(child);
+            }
+        }
+        self.dirty.mark_style();
+        self.sync_session();
+        self.emit(form, "reset");
+    }
+
+    /// Focus the control a `<label for>` points at, and forward the click.
+    pub fn label_target(&self, label: usize) -> Option<usize> {
+        let doc = self.doc.as_ref()?;
+        if doc.tag(label) != Some("label") {
+            return None;
+        }
+        if let Some(target) = doc.attr(label, "for") {
+            let wanted = target.to_string();
+            for id in 0..doc.nodes.len() {
+                if doc.attr(id, "id") == Some(wanted.as_str()) {
+                    return Some(id);
+                }
+            }
+            return None;
+        }
+        // Without `for`, the first control inside the label is the target.
+        let mut stack: Vec<NodeId> = doc.children(label).to_vec();
+        while let Some(id) = stack.pop() {
+            if matches!(
+                doc.tag(id),
+                Some("input") | Some("select") | Some("textarea") | Some("button")
+            ) {
+                return Some(id);
+            }
+            for &child in doc.children(id) {
+                stack.push(child);
+            }
+        }
+        None
     }
 
     /// True when the element is a submit control of a form.
@@ -1530,6 +2196,67 @@ pub fn bench_phases(fonts: &FontSet, html: &str, width: f32, iters: usize) -> Ph
 
 /// Normalize a user-typed address; re-exported so the UI does not depend on
 /// `naro-net` directly for this one rule.
+/// Nearest enclosing `<form>` of `node`, if any.
+fn enclosing_form(doc: &Document, node: NodeId) -> Option<NodeId> {
+    let mut current = doc.node(node).parent;
+    while let Some(id) = current {
+        if doc.tag(id) == Some("form") {
+            return Some(id);
+        }
+        current = doc.node(id).parent;
+    }
+    None
+}
+
+/// Every radio under `scope` that belongs to the same group as `name`.
+fn collect_radios(doc: &Document, scope: NodeId, name: &str, out: &mut Vec<NodeId>) {
+    let mut stack = vec![scope];
+    while let Some(id) = stack.pop() {
+        if doc.tag(id) == Some("input")
+            && doc
+                .attr(id, "type")
+                .map(|t| t.eq_ignore_ascii_case("radio"))
+                .unwrap_or(false)
+            && doc.attr(id, "name") == Some(name)
+        {
+            out.push(id);
+        }
+        for &child in doc.children(id).iter().rev() {
+            stack.push(child);
+        }
+    }
+}
+
+/// Drop an attribute from an element, if present.
+fn remove_attr(doc: &mut Document, id: NodeId, name: &str) {
+    if let NodeData::Element { attrs, .. } = &mut doc.nodes[id].data {
+        attrs.retain(|(n, _)| n != name);
+    }
+}
+
+/// The option a `<select>` currently shows: the last `selected` one, or the
+/// first, as a browser does.
+fn selected_option(doc: &Document, select: NodeId) -> Option<NodeId> {
+    let mut first = None;
+    let mut chosen = None;
+    let mut stack: Vec<NodeId> = doc.children(select).iter().rev().copied().collect();
+    while let Some(id) = stack.pop() {
+        if doc.tag(id) == Some("option") {
+            if first.is_none() {
+                first = Some(id);
+            }
+            if doc.attr(id, "selected").is_some() {
+                chosen = Some(id);
+            }
+            continue;
+        }
+        for &child in doc.children(id).iter().rev() {
+            stack.push(child);
+        }
+    }
+    chosen.or(first)
+}
+
 /// Append `name=value` to a query string, percent-encoding both sides.
 fn push_query(query: &mut String, name: &str, value: &str) {
     if !query.is_empty() {
@@ -2419,10 +3146,10 @@ mod tests {
         engine.insert_text("naro web");
         engine.press_enter();
         let nav = engine.take_pending_nav().expect("form submitted");
-        assert!(nav.starts_with("https://t.test/search?"), "{nav}");
-        assert!(nav.contains("q=naro+web"), "space encoded as +: {nav}");
-        assert!(nav.contains("hl=pt-BR"), "hidden input included: {nav}");
-        assert!(!nav.contains("ir="), "submit button excluded: {nav}");
+        assert!(nav.url.starts_with("https://t.test/search?"), "{nav:?}");
+        assert!(nav.url.contains("q=naro+web"), "space encoded as +: {nav:?}");
+        assert!(nav.url.contains("hl=pt-BR"), "hidden input included: {nav:?}");
+        assert!(!nav.url.contains("ir="), "submit button excluded: {nav:?}");
         assert!(engine.take_pending_nav().is_none(), "consumed once");
     }
 
@@ -2436,7 +3163,7 @@ mod tests {
         };
         assert!(click_selector(&mut engine, "#go"));
         let nav = engine.take_pending_nav().expect("submitted");
-        assert!(nav.contains("q=x"), "{nav}");
+        assert!(nav.url.contains("q=x"), "{nav:?}");
     }
 
     #[test]
@@ -2476,8 +3203,8 @@ mod tests {
         // Enter submits the search form of the real page.
         engine.press_enter();
         let nav = engine.take_pending_nav().expect("search submitted");
-        assert!(nav.starts_with("https://www.google.com/search?"), "{nav}");
-        assert!(nav.contains("q=naro"), "{nav}");
+        assert!(nav.url.starts_with("https://www.google.com/search?"), "{nav:?}");
+        assert!(nav.url.contains("q=naro"), "{nav:?}");
     }
 
     #[test]

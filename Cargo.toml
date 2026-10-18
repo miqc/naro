@@ -34,6 +34,7 @@ ureq = { version = "2.12.1", default-features = false, features = ["native-tls",
 ab_glyph = "0.2.29"
 url = "2.5.7"
 encoding_rs = "0.8"
+arboard = "3.4"
 
 [profile.release]
 opt-level = 3

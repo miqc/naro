@@ -7,6 +7,7 @@ use naro_css::Color;
 use naro_engine::{Engine, Navigation, Status, START_URL};
 use naro_layout::Rect;
 use naro_net::{normalize_input, FetchedPage};
+use naro_text::TextMeasure;
 use naro_paint::Canvas;
 
 use winit::application::ApplicationHandler;
@@ -391,7 +392,23 @@ struct App {
     pressed_new_tab: bool,
     /// Toolbar button with keyboard focus (F6 / Tab), for the focus ring.
     toolbar_focus: Option<NavIcon>,
+    /// Page coordinates where a selection drag started, while it is running.
+    selecting: Option<(f32, f32)>,
     proxy: winit::event_loop::EventLoopProxy<UserEvent>,
+}
+
+/// Put `text` on the system clipboard.
+///
+/// A clipboard needs a running desktop session; in a headless or locked
+/// environment `arboard` fails and the copy is skipped, which is why the
+/// selection itself is verified through `--select` and not through a paste.
+fn copy_to_clipboard(text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+        let _ = clipboard.set_text(text.to_string());
+    }
 }
 
 impl App {
@@ -437,6 +454,7 @@ impl App {
             pressed_nav: None,
             pressed_new_tab: false,
             toolbar_focus: None,
+            selecting: None,
             proxy,
         })
     }
@@ -693,6 +711,31 @@ impl App {
         self.chrome.cursor = self.chrome.addr.len();
     }
 
+    /// Follow a navigation a form asked for.
+    ///
+    /// A `GET` is an ordinary navigation; a `POST` keeps the URL clean and
+    /// sends the encoded controls as the request body, which is why the engine
+    /// hands over a method instead of a URL with a query bolted on.
+    fn navigate_pending(&mut self, pending: naro_engine::PendingNavigation) {
+        if !pending.is_post() {
+            self.navigate_to(&pending.url);
+            return;
+        }
+        let nav = self.engine.navigate(&pending.url, true);
+        let proxy = self.proxy.clone();
+        let generation = nav.generation;
+        let tab = self.active_id;
+        let url = pending.url.clone();
+        let body = pending.body.unwrap_or_default();
+        std::thread::spawn(move || {
+            let result = naro_net::with_session(|net| net.post_form(&url, &body));
+            let _ = proxy.send_event(UserEvent::Fetched { tab, generation, result });
+        });
+        self.chrome.addr = self.engine.display_url.clone();
+        self.chrome.cursor = self.chrome.addr.len();
+        self.sync_title();
+    }
+
     fn draw(&mut self) {
         let window = match &self.window {
             Some(w) => w.clone(),
@@ -740,10 +783,99 @@ impl App {
             let mut canvas = Canvas::new(&mut buffer, size.width, size.height, scale);
             canvas.clear(Color::WHITE);
             self.engine.paint_page(&mut canvas, layout.content);
+            self.draw_select_popup(&mut canvas, &layout);
             self.draw_chrome(&mut canvas, &layout);
         }
         let _ = buffer.present();
         self.surface = Some(surface);
+    }
+
+    /// Geometry of the open `<select>` popup, in window coordinates.
+    ///
+    /// The popup is chrome, not page: it is drawn after the page and before
+    /// the browser frame, and it is hit-tested before the page so a click
+    /// inside it cannot also reach the element underneath.
+    fn select_popup(&self, layout: &ChromeLayout) -> Option<(Rect, Vec<(usize, String, Rect)>)> {
+        let select = self.engine.is_select_open()?;
+        let rect = self.engine.select_rect(select)?;
+        let options = self.engine.select_options(select);
+        if options.is_empty() {
+            return None;
+        }
+        let row_h = 20.0f32;
+        let mut width = rect.w.max(60.0);
+        {
+            let fonts = &self.engine.fonts;
+            for (_, label, _) in &options {
+                let w = fonts.measure(label, 14.0, false) + 16.0;
+                width = width.max(w);
+            }
+        }
+        let height = row_h * options.len() as f32 + 2.0;
+        let x = layout.content.x + rect.x;
+        let mut y = layout.content.y + rect.y - self.engine.scroll_y + rect.h;
+        // Flip above the control when there is no room below it.
+        if y + height > layout.content.y + layout.content.h {
+            y = (layout.content.y + rect.y - self.engine.scroll_y - height).max(layout.content.y);
+        }
+        let popup = Rect { x, y, w: width, h: height };
+        let rows = options
+            .into_iter()
+            .enumerate()
+            .map(|(i, (node, label, selected))| {
+                let _ = selected;
+                (
+                    node,
+                    label,
+                    Rect {
+                        x: popup.x + 1.0,
+                        y: popup.y + 1.0 + i as f32 * row_h,
+                        w: popup.w - 2.0,
+                        h: row_h,
+                    },
+                )
+            })
+            .collect();
+        Some((popup, rows))
+    }
+
+    fn draw_select_popup(&mut self, canvas: &mut Canvas<'_>, layout: &ChromeLayout) {
+        let Some((popup, rows)) = self.select_popup(layout) else {
+            return;
+        };
+        let selected = self
+            .engine
+            .is_select_open()
+            .map(|node| {
+                self.engine
+                    .select_options(node)
+                    .into_iter()
+                    .find(|(_, _, chosen)| *chosen)
+                    .map(|(option, _, _)| option)
+            })
+            .flatten();
+        canvas.fill_rect(popup.x, popup.y, popup.w, popup.h, Color::WHITE);
+        for (node, label, row) in rows {
+            let hovered = row.contains(self.cursor.0, self.cursor.1);
+            if hovered {
+                canvas.fill_rect(row.x, row.y, row.w, row.h, Color::rgb(0xd6, 0xe4, 0xf7));
+            }
+            if Some(node) == selected {
+                canvas.fill_rect(row.x, row.y, row.w, row.h, Color::rgb(0xe8, 0xef, 0xfb));
+            }
+            let bold = Some(node) == selected;
+            canvas.draw_text(
+                row.x + 6.0,
+                row.y + row.h - 5.0,
+                &label,
+                14.0,
+                Color::rgb(0x1a, 0x1a, 0x1a),
+                bold,
+                &mut self.engine.fonts,
+            );
+        }
+        // A 1px frame, drawn last so it sits on top of the hover fill.
+        canvas.stroke_rect(popup.x, popup.y, popup.w, popup.h, 1.0, Color::rgb(0x76, 0x76, 0x76));
     }
 
     fn draw_chrome(&mut self, canvas: &mut Canvas<'_>, layout: &ChromeLayout) {
@@ -1011,7 +1143,13 @@ impl App {
                     return;
                 }
                 Key::Named(NamedKey::Escape) => {
-                    self.engine.blur();
+                    // Escape closes the select popup before it leaves the
+                    // control, as in a browser.
+                    if self.engine.is_select_open().is_some() {
+                        self.engine.close_select();
+                    } else {
+                        self.engine.blur();
+                    }
                     if let Some(window) = &self.window {
                         window.request_redraw();
                     }
@@ -1026,8 +1164,8 @@ impl App {
                 }
                 Key::Named(NamedKey::Enter) => {
                     self.engine.press_enter();
-                    if let Some(target) = self.engine.take_pending_nav() {
-                        self.navigate_to(&target);
+                    if let Some(pending) = self.engine.take_pending_nav() {
+                        self.navigate_pending(pending);
                     }
                     if let Some(window) = &self.window {
                         window.request_redraw();
@@ -1097,6 +1235,18 @@ impl App {
                     // and `window_event` acts on it.
                     if !self.close_tab(self.active_id) {
                         self.close_requested = true;
+                    }
+                    return;
+                }
+                if c.eq_ignore_ascii_case("c") {
+                    // A focused text control copies through the browser's own
+                    // path; anywhere else it copies the page selection.
+                    if self.engine.focus.is_some() && !self.chrome.focused {
+                        let node = self.engine.focus.unwrap();
+                        let value = self.engine.control_value_of(node);
+                        copy_to_clipboard(&value);
+                    } else {
+                        copy_to_clipboard(&self.engine.selection_text());
                     }
                     return;
                 }
@@ -1285,6 +1435,24 @@ impl App {
             self.chrome.replace_on_type = false;
             return;
         }
+        // The popup is above the page: a click on a row chooses, a click
+        // anywhere else closes it and goes no further.
+        if let Some((popup, rows)) = self.select_popup(&layout) {
+            if popup.contains(x, y) {
+                let hit = rows.iter().find(|(_, _, row)| row.contains(x, y));
+                if let (Some(select), Some((option, _, _))) = (self.engine.is_select_open(), hit) {
+                    self.engine.choose_option(select, *option);
+                } else {
+                    self.engine.close_select();
+                }
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+                return;
+            }
+            self.engine.close_select();
+        }
+
         if layout.content.contains(x, y) {
             self.chrome.focused = false;
             let page_x = x - layout.content.x;
@@ -1296,8 +1464,8 @@ impl App {
             self.engine.js.errors.extend(js.errors);
             self.engine.js.logs.extend(js.logs);
             if !consumed {
-                if let Some(target) = self.engine.take_pending_nav() {
-                    self.navigate_to(&target);
+                if let Some(pending) = self.engine.take_pending_nav() {
+                    self.navigate_pending(pending);
                 } else if let Some(target) = self.engine.hit_link(page_x, page_y) {
                     self.navigate_to(&target);
                 }
@@ -1400,6 +1568,23 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
+                if self.selecting.is_some() {
+                    let scale = self.window.as_ref().map(|w| w.scale_factor()).unwrap_or(1.0) as f32;
+                    let x = position.x as f32 / scale;
+                    let y = position.y as f32 / scale;
+                    self.cursor = (x, y);
+                    let layout = self.chrome_rects();
+                    if layout.content.contains(x, y) {
+                        self.engine.extend_selection(
+                            x - layout.content.x,
+                            y - layout.content.y + self.engine.scroll_y,
+                        );
+                    }
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                    return;
+                }
                 let scale = self.window.as_ref().map(|w| w.scale_factor()).unwrap_or(1.0) as f32;
                 self.cursor = (position.x as f32 / scale, position.y as f32 / scale);
                 let over_link = self.is_link_at(self.cursor.0, self.cursor.1);
@@ -1432,6 +1617,28 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::MouseInput { state: ElementState::Released, button: MouseButton::Left, .. } => {
                 let had = self.pressed_nav.take().is_some();
                 let had_tab = std::mem::take(&mut self.pressed_new_tab);
+                if let Some(start) = self.selecting.take() {
+                    let (x, y) = self.cursor;
+                    let layout = self.chrome_rects();
+                    if layout.content.contains(x, y) {
+                        self.engine.extend_selection(
+                            x - layout.content.x,
+                            y - layout.content.y + self.engine.scroll_y,
+                        );
+                    }
+                    // A drag that did not move is a click, so the page still
+                    // gets it; a real drag is a selection and is not a click.
+                    let moved = (start.0 - (x - layout.content.x)).abs() > 2.0
+                        || (start.1 - (y - layout.content.y + self.engine.scroll_y)).abs() > 2.0;
+                    if !moved {
+                        self.engine.clear_selection();
+                        self.handle_click(event_loop, x, y);
+                    }
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                    return;
+                }
                 if had || had_tab {
                     if let Some(window) = &self.window {
                         window.request_redraw();
@@ -1451,6 +1658,26 @@ impl ApplicationHandler<UserEvent> for App {
                 self.toolbar_focus = None;
                 self.pressed_nav = self.nav_button_at(x, y);
                 self.pressed_new_tab = self.chrome_rects().new_tab.contains(x, y);
+                // A press on page text starts a selection instead of a click:
+                // the click is dispatched on release, when it is still a click.
+                let layout = self.chrome_rects();
+                let page = if layout.content.contains(x, y) {
+                    Some((
+                        x - layout.content.x,
+                        y - layout.content.y + self.engine.scroll_y,
+                    ))
+                } else {
+                    None
+                };
+                if let Some((px, py)) = page {
+                    if self.engine.begin_selection(px, py) {
+                        self.selecting = Some((px, py));
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
+                }
                 self.handle_click(event_loop, x, y);
                 if let Some(window) = &self.window {
                     window.request_redraw();
@@ -2032,6 +2259,105 @@ fn run_compat(dir: &str, serve: bool, verbose: bool) -> i32 {
                         }
                     }
                 }
+                "choose" => {
+                    // choose:<select-selector>=<option text> — open the select
+                    // and pick that option, the way the popup does. The popup
+                    // itself is chrome and has no place in a headless run, so
+                    // the check drives the engine call behind it.
+                    let Some((selector, wanted)) = value.split_once('=') else {
+                        ok = false;
+                        notes.push(format!("choose malformado: {value:?}"));
+                        continue;
+                    };
+                    let node = engine
+                        .doc
+                        .as_ref()
+                        .and_then(|doc| naro_css::query_selector(doc, selector));
+                    let Some(node) = node else {
+                        ok = false;
+                        notes.push(format!("select ausente: {selector:?}"));
+                        continue;
+                    };
+                    let options = engine.open_select(node);
+                    match options.iter().find(|(_, text, _)| text == wanted) {
+                        Some((option, _, _)) => engine.choose_option(node, *option),
+                        None => {
+                            ok = false;
+                            notes.push(format!(
+                                "opção ausente: {wanted:?} em {selector:?} ({:?})",
+                                options.iter().map(|(_, t, _)| t.clone()).collect::<Vec<_>>()
+                            ));
+                        }
+                    }
+                }
+                "submit" => {
+                    // submit:<selector>=<get|post>[:<trecho do corpo>] — click
+                    // the control and report the navigation it asked for. The
+                    // runner never follows it, so a form can be verified
+                    // without a network round trip.
+                    let Some((selector, want)) = value.split_once('=') else {
+                        ok = false;
+                        notes.push(format!("submit malformado: {value:?}"));
+                        continue;
+                    };
+                    let (want_method, want_body) = match want.split_once(':') {
+                        Some((method, body)) => (method, Some(body)),
+                        None => (want, None),
+                    };
+                    let node = engine
+                        .doc
+                        .as_ref()
+                        .and_then(|doc| naro_css::query_selector(doc, selector));
+                    let Some(node) = node else {
+                        ok = false;
+                        notes.push(format!("controle ausente: {selector:?}"));
+                        continue;
+                    };
+                    engine.default_click(node);
+                    let got = engine.take_pending_nav();
+                    let (got_method, got_body) = match &got {
+                        Some(nav) if nav.is_post() => ("post", nav.body.clone().unwrap_or_default()),
+                        Some(nav) => ("get", nav.url.clone()),
+                        None => ("none", String::new()),
+                    };
+                    let method_ok = got_method == want_method;
+                    let body_ok = match want_body {
+                        Some(body) => got_body.contains(body),
+                        None => true,
+                    };
+                    if !method_ok || !body_ok {
+                        ok = false;
+                        notes.push(format!(
+                            "submit {selector:?} {got_method} {got_body:?} != {want:?}"
+                        ));
+                    }
+                }
+                "selection" => {
+                    // selection:x1,y1,x2,y2=<texto> — apply a selection and
+                    // compare the text it yields. The engine owns the
+                    // selection, so this is the only honest way to check it
+                    // without a clipboard.
+                    let Some((coords, want)) = value.split_once('=') else {
+                        ok = false;
+                        notes.push(format!("selection malformada: {value:?}"));
+                        continue;
+                    };
+                    let nums: Vec<f32> = coords
+                        .split(',')
+                        .filter_map(|v| v.trim().parse::<f32>().ok())
+                        .collect();
+                    if nums.len() != 4 {
+                        ok = false;
+                        notes.push(format!("selection sem 4 coordenadas: {coords:?}"));
+                        continue;
+                    }
+                    engine.set_selection((nums[0], nums[1]), (nums[2], nums[3]));
+                    let got = engine.selection_text();
+                    if got != want {
+                        ok = false;
+                        notes.push(format!("seleção {got:?} != {want:?}"));
+                    }
+                }
                 "restyle" => {
                     let want: u32 = value.parse().unwrap_or(0);
                     if engine.restyle_count != want {
@@ -2426,16 +2752,43 @@ fn main() {
         let target = args.get(1).cloned().unwrap_or_else(|| START_URL.to_string());
         let width = args.get(2).and_then(|w| w.parse::<f32>().ok()).unwrap_or(1000.0);
         let mut engine = load_for_headless(&target, width);
+        // `--select x1 y1 x2 y2` applies a selection before dumping, so the
+        // selected text can be verified without a clipboard or a mouse.
+        let select_at = args
+            .iter()
+            .position(|a| a == "--select")
+            .and_then(|at| {
+                let coords: Vec<f32> = args
+                    .iter()
+                    .skip(at + 1)
+                    .take(4)
+                    .filter_map(|v| v.parse::<f32>().ok())
+                    .collect();
+                if coords.len() == 4 {
+                    Some(((coords[0], coords[1]), (coords[2], coords[3])))
+                } else {
+                    None
+                }
+            });
+        if let Some((anchor, focus)) = select_at {
+            if engine.set_selection(anchor, focus) {
+                println!("SELECTION: {}", engine.selection_text());
+            } else {
+                println!("SELECTION: ");
+            }
+        }
         // `--dump <url> <width> <x> <y>` dispatches a click before dumping.
-        if let (Some(x), Some(y)) = (
-            args.get(3).and_then(|v| v.parse::<f32>().ok()),
-            args.get(4).and_then(|v| v.parse::<f32>().ok()),
-        ) {
-            let (outcome, consumed) = engine.click_at(x, y);
-            engine.js.errors.extend(outcome.errors);
-            engine.js.logs.extend(outcome.logs);
-            if !consumed {
-                println!("CLICK: sem handler");
+        if select_at.is_none() {
+            if let (Some(x), Some(y)) = (
+                args.get(3).and_then(|v| v.parse::<f32>().ok()),
+                args.get(4).and_then(|v| v.parse::<f32>().ok()),
+            ) {
+                let (outcome, consumed) = engine.click_at(x, y);
+                engine.js.errors.extend(outcome.errors);
+                engine.js.logs.extend(outcome.logs);
+                if !consumed {
+                    println!("CLICK: sem handler");
+                }
             }
         }
         print!("{}", engine.dump_tree());
@@ -2569,15 +2922,38 @@ fn main() {
         let output = args.get(2).cloned().unwrap_or_else(|| "out.bmp".to_string());
         let width = args.get(3).and_then(|w| w.parse::<f32>().ok()).unwrap_or(1000.0);
         let mut engine = load_for_headless(&target, width);
+        // `--select x1 y1 x2 y2` applies a selection before rendering, so the
+        // highlight itself can be inspected in the frame.
+        let select_at = args
+            .iter()
+            .position(|a| a == "--select")
+            .and_then(|at| {
+                let coords: Vec<f32> = args
+                    .iter()
+                    .skip(at + 1)
+                    .take(4)
+                    .filter_map(|v| v.parse::<f32>().ok())
+                    .collect();
+                if coords.len() == 4 {
+                    Some(((coords[0], coords[1]), (coords[2], coords[3])))
+                } else {
+                    None
+                }
+            });
+        if let Some((anchor, focus)) = select_at {
+            engine.set_selection(anchor, focus);
+        }
         // `--render <url> <out> <width> <x> <y>` dispatches a click first, the
         // same way `--dump` does, so post-interaction frames can be inspected.
-        if let (Some(x), Some(y)) = (
-            args.get(4).and_then(|v| v.parse::<f32>().ok()),
-            args.get(5).and_then(|v| v.parse::<f32>().ok()),
-        ) {
-            let (outcome, _) = engine.click_at(x, y);
-            engine.js.errors.extend(outcome.errors);
-            engine.js.logs.extend(outcome.logs);
+        if select_at.is_none() {
+            if let (Some(x), Some(y)) = (
+                args.get(4).and_then(|v| v.parse::<f32>().ok()),
+                args.get(5).and_then(|v| v.parse::<f32>().ok()),
+            ) {
+                let (outcome, _) = engine.click_at(x, y);
+                engine.js.errors.extend(outcome.errors);
+                engine.js.logs.extend(outcome.logs);
+            }
         }
         let mut pixels = vec![0u32; width as usize * 700];
         let mut canvas = Canvas::new(&mut pixels, width as u32, 700, 1.0);

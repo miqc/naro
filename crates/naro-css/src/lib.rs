@@ -727,10 +727,14 @@ pub enum Pseudo {
     /// `:host` / `:host(<compound>)`. Matches the host element of the shadow
     /// tree whose sheet declares it — never from outside that tree.
     Host(Option<Box<Compound>>),
-    /// `:hover`, `:focus`, `:active`, `:visited`, `:link`, `:checked`,
-    /// `:disabled`, `:target`, `:focus-within`, `:focus-visible`.
+    /// `:hover`, `:focus`, `:active`, `:visited`, `:link`, `:disabled`,
+    /// `:target`, `:focus-within`, `:focus-visible`.
     /// Parsed and valid, but never matches a static paint.
     Interactive,
+    /// `:checked` — a real state, not an interaction: it matches a
+    /// `checked` input and a `selected` option, which is what a page
+    /// inspecting its own form needs.
+    Checked,
     /// Valid pseudo-class the engine does not implement. Never matches.
     Unsupported,
 }
@@ -1578,7 +1582,8 @@ fn parse_pseudo(
             let compound = parse_compound_part(inner, &mut inner_report)?;
             Pseudo::Not(Box::new(compound))
         }
-        "hover" | "focus" | "active" | "visited" | "link" | "checked" | "disabled" | "target"
+        "checked" => Pseudo::Checked,
+        "hover" | "focus" | "active" | "visited" | "link" | "disabled" | "target"
         | "focus-within" | "focus-visible" => {
             report.interactive += 1;
             Pseudo::Interactive
@@ -1808,6 +1813,11 @@ fn pseudo_matches(doc: &Document, id: NodeId, pseudo: &Pseudo, scope: Option<Nod
         // A static paint has no hover, focus or visited state: applying these
         // rules unconditionally painted interaction colours into every page.
         Pseudo::Interactive | Pseudo::Unsupported => false,
+        // `:checked` is state, not interaction: the attribute is the state.
+        Pseudo::Checked => {
+            matches!(doc.tag(id), Some("input")) && doc.attr(id, "checked").is_some()
+                || matches!(doc.tag(id), Some("option")) && doc.attr(id, "selected").is_some()
+        }
     }
 }
 
@@ -1866,6 +1876,13 @@ center { display: block; text-align: center; }
 [hidden] { display: none; }
 input, textarea, button { display: inline; padding: 1px 2px; border: 1px solid #767676; background-color: #ffffff; color: #1a1a1a; }
 button { background-color: #eef0f4; }
+/* A checkbox and a radio are fixed-size boxes, not text fields: they must not
+   take the 160px a text input defaults to. */
+input[type=checkbox], input[type=radio] { width: 13px; height: 13px; padding: 0; margin: 3px 3px 3px 4px; vertical-align: middle; }
+input[type=radio] { border-radius: 7px; }
+select { display: inline; padding: 1px 2px; border: 1px solid #767676; background-color: #ffffff; color: #1a1a1a; }
+option, optgroup { display: none; }
+label { display: inline; }
 textarea { display: block; }
 input[type=submit], input[type=button], button { cursor: pointer; }
 head, script, style, title, meta, link, base, noscript, template { display: none; }

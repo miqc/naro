@@ -1,0 +1,62 @@
+<!doctype html><html><head><title>31 Formulários</title><style>
+body { margin: 8px; font-family: sans-serif; }
+label { margin-right: 8px; }
+#sel { width: 120px; }
+</style></head><body>
+<form id="f" action="31-forms.html" method="get">
+  <label for="cb">Aceito</label>
+  <input type="checkbox" id="cb" name="cb" value="sim">
+
+  <label for="r1">Um</label>
+  <input type="radio" id="r1" name="cor" value="vermelho">
+  <label for="r2">Dois</label>
+  <input type="radio" id="r2" name="cor" value="azul">
+
+  <select id="sel" name="s">
+    <option value="a">Alfa</option>
+    <option value="b">Beta</option>
+    <option value="c">Gama</option>
+  </select>
+
+  <input id="nome" name="nome" value="inicial">
+  <input id="go" type="submit" value="Enviar">
+</form>
+
+<form id="post" action="31-forms.html" method="post">
+  <input name="p" value="1">
+  <input id="post-go" type="submit" value="Postar">
+</form>
+
+<p id="estado">inicial</p>
+<script>
+const log = (key, value) => console.log(key + "=" + value);
+const cb = document.getElementById("cb");
+const r1 = document.getElementById("r1");
+const r2 = document.getElementById("r2");
+const sel = document.getElementById("sel");
+
+// `:checked` now reflects real state.
+log("checked.attr", cb.checked + "," + cb.hasAttribute("checked"));
+log("radio.attr", r1.checked + "," + r2.checked);
+
+let events = [];
+cb.addEventListener("input", () => events.push("input"));
+cb.addEventListener("change", () => events.push("change"));
+cb.click();
+log("click.events", events.join(","));
+log("click.state", cb.checked);
+
+// The radio group: checking one unchecks the other.
+r1.click();
+r2.click();
+log("radio.group", r1.checked + "," + r2.checked);
+
+// A label click reaches the control it names.
+document.querySelector("label[for=cb]").click();
+log("label.toggle", cb.checked);
+
+// `<select>`: value, options and the text a closed select paints.
+log("select.value", sel.value + "," + sel.options.length + "," + sel.selectedIndex);
+document.getElementById("estado").textContent = "fim";
+</script>
+</body></html>

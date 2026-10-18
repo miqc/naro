@@ -398,6 +398,87 @@ impl Document {
         }
     }
 
+    /// Flip the `checked` state of a checkbox, or check a radio and uncheck
+    /// the rest of its group.
+    ///
+    /// Returns `false` when the node is not a toggle control, or when it is a
+    /// radio that is already checked (a browser does not let a click uncheck
+    /// a radio). The state *is* the attribute, so the cascade (`:checked`),
+    /// the paint pass and script all read the same thing.
+    pub fn toggle_checked(&mut self, node: NodeId) -> bool {
+        if self.tag(node) != Some("input") {
+            return false;
+        }
+        let kind = self
+            .attr(node, "type")
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if kind != "checkbox" && kind != "radio" {
+            return false;
+        }
+        let checked = self.attr(node, "checked").is_some();
+        if kind == "radio" {
+            if checked {
+                return false;
+            }
+            if let Some(name) = self.attr(node, "name").map(|n| n.to_string()) {
+                let scope = self.enclosing_form(node).unwrap_or(self.root);
+                let mut radios = Vec::new();
+                self.collect_radios(scope, &name, &mut radios);
+                for other in radios {
+                    if other != node {
+                        self.remove_attr(other, "checked");
+                    }
+                }
+            }
+            self.set_attr(node, "checked", "checked");
+            return true;
+        }
+        if checked {
+            self.remove_attr(node, "checked");
+        } else {
+            self.set_attr(node, "checked", "checked");
+        }
+        true
+    }
+
+    /// Remove an attribute, if present.
+    pub fn remove_attr(&mut self, node: NodeId, name: &str) {
+        if let NodeData::Element { attrs, .. } = &mut self.nodes[node].data {
+            attrs.retain(|(n, _)| n != name);
+        }
+    }
+
+    /// Nearest enclosing `<form>` of `node`.
+    pub fn enclosing_form(&self, node: NodeId) -> Option<NodeId> {
+        let mut current = self.nodes[node].parent;
+        while let Some(id) = current {
+            if self.tag(id) == Some("form") {
+                return Some(id);
+            }
+            current = self.nodes[id].parent;
+        }
+        None
+    }
+
+    fn collect_radios(&self, scope: NodeId, name: &str, out: &mut Vec<NodeId>) {
+        let mut stack = vec![scope];
+        while let Some(id) = stack.pop() {
+            if self.tag(id) == Some("input")
+                && self
+                    .attr(id, "type")
+                    .map(|t| t.eq_ignore_ascii_case("radio"))
+                    .unwrap_or(false)
+                && self.attr(id, "name") == Some(name)
+            {
+                out.push(id);
+            }
+            for &child in self.nodes[id].children.iter().rev() {
+                stack.push(child);
+            }
+        }
+    }
+
     /// Rewrite an attribute in place; used to absolutize resource URLs.
     pub fn set_attr(&mut self, id: NodeId, name: &str, value: &str) {
         if let NodeData::Element { attrs, .. } = &mut self.nodes[id].data {
@@ -407,6 +488,16 @@ impl Document {
                 attrs.push((name.to_string(), value.to_string()));
             }
         }
+    }
+
+    /// All text under `id`, concatenated in document order.
+    ///
+    /// An `<option>` holds its label in a text child, so a control that paints
+    /// its own text needs the whole subtree, not just a text node.
+    pub fn text_content(&self, id: NodeId) -> String {
+        let mut out = String::new();
+        self.collect_text(id, &mut out);
+        out
     }
 
     pub fn text(&self, id: NodeId) -> Option<&str> {

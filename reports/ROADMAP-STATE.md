@@ -9,18 +9,44 @@ Marco em execução: **v0.2** (fases A0, A1, A2, A3, A7). Plano: `local://naro-g
 | A0 | concluída | tag `baseline-f8` + `phase-a0`; `228 passed / 0 failed`; `--compat` 27/0/1; `computed:`/`attr:` verificados em positivo e negativo | 1 | baseline registrado abaixo |
 | A1 | concluída | tag `phase-a1`; `228 passed / 0 failed`; `--compat` **28 pass / 0 falhas / 1 não suportado** (29 total); `29-platform.html` com 46 checks; 4 páginas de referência com `JS ERROR` idênticos ao baseline e `CONTENT_HEIGHT` idêntico; `diff reports/p8-rust.txt` = 0 | 1 | ver desvios abaixo |
 | A2 | concluída | tag `phase-a2`; `233 passed / 0 failed`; `--compat` **28 pass / 0 falhas / 2 não suportados** (30) e `--compat --serve` **29 pass / 0 falhas / 1 não suportado**; `30-net.html` com 19 checks provando fetch, XHR, cache (1 requisição ao servidor para 3 pedidos), revalidação 304, cookie de ida e volta, `HttpOnly` invisível ao script, POST e charset windows-1252; 4 páginas de referência idênticas ao baseline; `diff reports/p8-rust.txt` = 0 | 1 | ver desvios abaixo |
-| A3 | pendente | — | 0 | depende de A1 (concluída); POST depende de A2 |
+| A3 | concluída | tag `phase-a3`; `233 passed / 0 failed`; `--compat` **30 pass / 0 falhas / 2 não suportados** (32) e `--compat --serve` **31 pass / 0 falhas / 1 não suportado**; `31-forms.html` (checkbox/radio/:checked/label/select/POST) e `32-selection.html` (`selection:` em duas direções); `--render ... --select` mostra 5090 px de realce nas linhas certas; 4 páginas de referência com `JS ERROR` e `CONTENT_HEIGHT` idênticos; `p8-rust` difere em 84 linhas, todas explicadas pela caixa do `<select>` | 1 | ver desvios abaixo |
 | A7 | pendente | — | 0 | depende de A2 e A3 |
 | Marco v0.2 | pendente | — | 0 | `reports/milestone-v0.2.md` |
 
 ## Próxima ação
 
-A3, passo 1: `checkbox`/`radio` em `naro-layout` (caixa fixa 13x13 com borda de 1 px)
-e o traço de marcado em `naro-paint`.
+A7, passo 1: `naro_net::Origin` e a checagem de CORS em `fetch`/`XMLHttpRequest`.
 
 ## Bloqueios
 
 Nenhum.
+
+## Desvios e decisões de A3
+
+1. **`p8-rust.txt` deixou de bater: 84 linhas de diferença, todas por causa do
+   `<select>`.** Antes de A3 o `<select>` não gerava caixa (era um elemento inline
+   vazio), então `div#select` ocupava 812 px; agora o `<select>` é um controle
+   inline-block com caixa própria (174x23.2) e o `div#select` shrink-wrappa (246 px).
+   O deslocamento vertical de 0,4 px que isso causa empurra o rodapé inteiro. As duas
+   únicas linhas novas são `select#`, e nenhuma caixa some. Nova referência guardada em
+   `reports/p8-rust-a3.txt`; `reports/p8-rust.txt` fica intacto como baseline histórico.
+2. `:checked` **passou a casar de verdade** (`Pseudo::Checked`): `input[checked]` e
+   `option[selected]`. Antes caía em `Pseudo::Interactive`, que nunca casa. Mudança
+   deliberada, coberta por `31-forms.html` (`computed:`/`attr:`).
+3. A regra de estado ficou **uma vez só**, em `Document::toggle_checked`
+   (`naro-html`). O engine aplica na árvore viva quando há sessão e no próprio snapshot
+   quando não há, o que é o que impede `el.checked` e o atributo de divergirem.
+4. `element.click()` de script roda a ação padrão **na hora** para um toggle (para que
+   `el.checked` já esteja certo na instrução seguinte) e enfileira o resto (submit,
+   reset, popup) para o `flush`. O engine drena a fila em `flush` e no fim da carga,
+   antes de estilizar, e devolve a árvore resultante à sessão (`sync_session`).
+5. `matchMedia`, `URL`, `history` e o resto de A1 continuam como em A1.
+6. O popup do `<select>` é chrome (`App::select_popup`/`draw_select_popup`): desenhado
+   depois da página, hit-testado antes dela, fecha com `Escape`. Num run headless ele
+   não existe, por isso a check `choose:` chama `Engine::open_select`/`choose_option`,
+   que é o mesmo caminho que o popup usa.
+7. Cópia com `Ctrl+C` usa `arboard`; sem sessão gráfica a cópia é ignorada, e a prova
+   determinística da seleção é `--select`/`--render`/`selection:`.
 
 ## Desvios e decisões de A2
 

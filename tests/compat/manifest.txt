@@ -22,6 +22,10 @@
 #                              visibility border-radius; an unknown PROP fails the check
 #   attr:SEL:NAME=VALUE -> the first element matching SEL has attribute NAME = VALUE
 #                          (e.g. attr:input[type=checkbox]:checked=, attr:a:href=/x)
+#   choose:SEL=TEXTO -> open that <select> and pick the option with that label
+#   submit:SEL=METHOD[:BODY] -> click the control and check the navigation it
+#                     asked for (METHOD `get` or `post`, BODY a substring)
+#   selection:x1,y1,x2,y2=TEXTO -> drag a selection and check the text it yields
 #   served[:motivo] -> the case needs a real origin (`--serve`); on file:// it
 #                     is counted as unsupported instead of failing
 #   nojsrerror   -> no JS error recorded
@@ -63,3 +67,11 @@
 # precisam de uma origem http real; em file:// o caso é contado como
 # não suportado em vez de falhar.
 30-net.html | served | log:fetch.status=200,true,OK | log:fetch.url=true | log:fetch.json=true,2 | log:fetch.latin1=çafé | log:xhr.status=200,corpo-cache,4 | log:cache.first=corpo-cache | log:cache.second=corpo-cache | log:cache.count=1 | log:etag.first=corpo-etag | log:etag.second=corpo-etag | log:etag.count=2 | log:cookie.server=cookie-set | log:cookie.visible=cliente=9 | log:cookie.has=true | log:cookie.hidden=true | log:post.body=recebido:7 | log:missing.status=404,false | log:doc.origin=true | nojsrerror
+# 31: formulários — checkbox/radio com estado real, :checked, label, select e
+# POST. `choose` e `submit` dirigem a mesma chamada de engine que o popup e o
+# clique usam, porque o popup é chrome e não existe num run headless.
+31-forms.html | log:checked.attr=false,false | log:radio.attr=false,false | log:click.events=input,change | log:click.state=true | log:radio.group=false,true | log:label.toggle=true | log:select.value=a,3,-1 | attr:#r2:checked=checked | computed:#cb:width=13px | computed:#cb:height=13px | choose:#sel=Beta | attr:#sel option[selected]:value=b | text:Beta | submit:#post-go=post:p=1 | submit:#go=get:nome=inicial | nojsrerror
+# 32: seleção de texto. A seleção é estado do engine, então a check `selection`
+# aplica um arrasto e compara o texto; `getSelection().toString()` devolve o
+# mesmo valor para o script.
+32-selection.html | log:sel.initial="" | selection:1,25,999,60=Primeira linha de texto selecionavel. Segunda linha para arrastar. | selection:40,25,300,60=ra linha de texto selecionavel. Segunda linha para arrastar. | nojsrerror

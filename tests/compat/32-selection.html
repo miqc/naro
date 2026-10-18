@@ -1,0 +1,13 @@
+<!doctype html><html><head><title>32 Seleção</title><style>
+body { margin: 8px; font-size: 16px; }
+p { margin: 8px 0; line-height: 1.4; }
+</style></head><body>
+<p id="a">Primeira linha de texto selecionavel.</p>
+<p id="b">Segunda linha para arrastar.</p>
+<p id="c">Terceira linha de fecho.</p>
+<script>
+// A selection is engine state, so script only reads it back: this page
+// proves `getSelection().toString()` mirrors what is painted.
+console.log("sel.initial=" + JSON.stringify(getSelection().toString()));
+</script>
+</body></html>

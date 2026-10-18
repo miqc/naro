@@ -265,6 +265,9 @@ fn predicted_height(b: &BoxNode) -> f32 {
 
 /// What a text control paints: its `value`, or its placeholder.
 fn control_text(doc: &Document, id: NodeId) -> Option<String> {
+    if doc.tag(id) == Some("select") {
+        return Some(select_text(doc, id));
+    }
     if let Some(value) = doc.attr(id, "value") {
         if !value.is_empty() {
             return Some(value.to_string());
@@ -276,6 +279,31 @@ fn control_text(doc: &Document, id: NodeId) -> Option<String> {
     } else {
         Some(placeholder.to_string())
     }
+}
+
+/// The label a closed `<select>` paints: its selected option, or the first.
+pub fn select_text(doc: &Document, id: NodeId) -> String {
+    let mut first: Option<String> = None;
+    let mut stack: Vec<NodeId> = doc.children(id).iter().rev().copied().collect();
+    while let Some(node) = stack.pop() {
+        if doc.tag(node) == Some("option") {
+            let text = doc
+                .attr(node, "label")
+                .map(|l| l.to_string())
+                .unwrap_or_else(|| doc.text_content(node).trim().to_string());
+            if doc.attr(node, "selected").is_some() {
+                return text;
+            }
+            if first.is_none() {
+                first = Some(text);
+            }
+            continue;
+        }
+        for &child in doc.children(node).iter().rev() {
+            stack.push(child);
+        }
+    }
+    first.unwrap_or_default()
 }
 
 /// Box-level display values: these take part in the block flow.
@@ -297,7 +325,12 @@ fn is_out_of_flow(position: Position) -> bool {
 }
 
 fn is_hidden_tag(tag: &str) -> bool {
-    matches!(tag, "head" | "script" | "style" | "title" | "meta" | "link" | "base")
+    // `option` and `optgroup` are painted by the `<select>` they belong to,
+    // never in the flow: a closed select shows one line of text.
+    matches!(
+        tag,
+        "head" | "script" | "style" | "title" | "meta" | "link" | "base" | "option" | "optgroup"
+    )
 }
 
 /// Elements that must not generate a box: `hidden`, and non-visual inputs.
@@ -443,7 +476,9 @@ fn build_children_into(
 
                 // Form controls are inline-level boxes: they sit in the line
                 // but still need a box for painting and hit-testing.
-                if matches!(tag, "input" | "button") && styles[parent].display != Display::Flex {
+                if matches!(tag, "input" | "button" | "select")
+                    && styles[parent].display != Display::Flex
+                {
                     let mut node = build_box(doc, styles, child, child_link);
                     // The control paints its value/placeholder inside itself.
                     if let Some(text) = control_text(doc, child) {
@@ -1277,7 +1312,7 @@ impl<'a> Flow<'a> {
         // browser sizes a button from the text it paints, and without this a
         // "Pesquisa Google" button was measured as its widest word and the text
         // wrapped into a narrow column.
-        if matches!(b.tag.as_str(), "input" | "button") {
+        if matches!(b.tag.as_str(), "input" | "button" | "select") {
             if let Some(doc) = self.doc {
                 if let Some(label) = control_text(doc, b.node) {
                     let mut widest = 0.0f32;
@@ -1403,7 +1438,7 @@ impl<'a> Flow<'a> {
             }
             return self.svg_intrinsic(b).0;
         }
-        if matches!(b.tag.as_str(), "input" | "button") {
+        if matches!(b.tag.as_str(), "input" | "button" | "select") {
             if let Some(doc) = self.doc {
                 if let Some(label) = control_text(doc, b.node) {
                     return self.measure.measure(
@@ -1493,7 +1528,8 @@ impl<'a> Flow<'a> {
                         t.to_ascii_lowercase().as_str(),
                         "submit" | "reset" | "button" | "image" | "checkbox" | "radio"
                     )
-                });
+                })
+                || child.tag == "select";
             if is_text_field {
                 natural.max(160.0)
             } else {
