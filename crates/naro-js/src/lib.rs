@@ -131,6 +131,21 @@ pub struct ElementBox {
     pub border_left: f32,
 }
 
+/// A history change requested by page script.
+///
+/// `naro-js` cannot touch the engine, so `history.pushState` and friends queue
+/// an op that the engine applies on its next [`Engine::flush`], which is where
+/// the URL and the session's own history vector are already rewritten.
+#[derive(Clone, Debug, PartialEq)]
+pub enum HistoryOp {
+    /// `history.pushState` (`replace = false`) or `replaceState`.
+    Push { url: String, replace: bool },
+    Back,
+    Forward,
+    /// `history.go(n)`: negative goes back, positive forward.
+    Go(i64),
+}
+
 struct Dom {
     doc: Document,
     logs: Vec<String>,
@@ -141,6 +156,17 @@ struct Dom {
     invalidation: Invalidation,
     /// Measured border boxes, indexed by `NodeId`. `None` means "not laid out".
     geometry: Vec<Option<ElementBox>>,
+    /// Computed styles indexed by `NodeId`, mirroring the engine's `styles`, so
+    /// `getComputedStyle` reads the cascade the renderer actually used.
+    computed: Vec<naro_css::ComputedStyle>,
+    /// `document.readyState`, driven by the load sequence.
+    ready_state: &'static str,
+    /// History changes queued by script, drained by the engine.
+    history_ops: Vec<HistoryOp>,
+    /// Index of the current entry in the engine's history vector.
+    history_index: i64,
+    /// Viewport the page was laid out at, for `matchMedia`.
+    viewport: (f32, f32),
     /// Document URL, backing `location`.
     url: String,
 }
@@ -158,7 +184,7 @@ impl Dom {
     }
 }
 
-const BOOTSTRAP: &str = r#"
+const BOOTSTRAP: &str = r##"
 (function () {
   const listeners = [];
   const timers = [];
@@ -302,16 +328,22 @@ const BOOTSTRAP: &str = r#"
         const path = [];
         let cur = id;
         while (cur >= 0) { path.push(cur); cur = __naro_parent(cur); }
-        __naro_dispatch(id, String(ev && ev.type ? ev.type : ev), path);
-        return true;
+        __naro_dispatch(id, ev, path);
+        return !(ev && ev.defaultPrevented);
       },
       click() {
         const path = [];
         let cur = id;
         while (cur >= 0) { path.push(cur); cur = __naro_parent(cur); }
-        __naro_dispatch(id, "click", path);
+        __naro_dispatch(id, new MouseEvent("click", { bubbles: true, cancelable: true }), path);
       },
       get tagName() { return __naro_tag(id); },
+      get nodeName() {
+        if (__naro_is_fragment(id)) return "#document-fragment";
+        if (__naro_is_shadow_root(id)) return "#document-fragment";
+        if (__naro_tag(id) === "") return "#text";
+        return __naro_parent(id) < 0 ? "#document" : __naro_tag(id);
+      },
       get children() { return __naro_children(id).map(wrap); },
       get childNodes() { return __naro_child_nodes(id).map(wrap); },
       get firstChild() { const c = __naro_child_nodes(id); return c.length ? wrap(c[0]) : null; },
@@ -337,8 +369,8 @@ const BOOTSTRAP: &str = r#"
         return wrap(p);
       },
       get nodeType() {
-        // 11 = shadow root, 1 = element, 3 = text, 9 = document.
-        if (__naro_is_shadow_root(id)) return 11;
+        // 11 = shadow root or fragment, 1 = element, 3 = text, 9 = document.
+        if (__naro_is_shadow_root(id) || __naro_is_fragment(id)) return 11;
         if (__naro_tag(id) === "") return 3;
         return __naro_parent(id) < 0 ? 9 : 1;
       },
@@ -407,6 +439,71 @@ const BOOTSTRAP: &str = r#"
         if (host < 0) return;
         ceUpgradeTree(host);
         for (const node of nodes) __naro_mutation("childList", host, null, node, -1);
+      },
+      // --- traversal and mutation (A1) -----------------------------------
+      // Element-only navigation reads `__naro_element_children`, which skips
+      // text nodes exactly like the DOM's element axes.
+      get firstElementChild() {
+        const c = __naro_element_children(id);
+        return c.length ? wrap(c[0]) : null;
+      },
+      get lastElementChild() {
+        const c = __naro_element_children(id);
+        return c.length ? wrap(c[c.length - 1]) : null;
+      },
+      get childElementCount() { return __naro_element_children(id).length; },
+      get nextElementSibling() {
+        const p = __naro_parent(id);
+        if (p < 0) return null;
+        const list = __naro_element_children(p);
+        const i = list.indexOf(id);
+        return i >= 0 && i + 1 < list.length ? wrap(list[i + 1]) : null;
+      },
+      get previousElementSibling() {
+        const p = __naro_parent(id);
+        if (p < 0) return null;
+        const list = __naro_element_children(p);
+        const i = list.indexOf(id);
+        return i > 0 ? wrap(list[i - 1]) : null;
+      },
+      getElementsByClassName(name) {
+        const wanted = String(name).split(/\s+/).filter(Boolean);
+        if (wanted.length === 0) return [];
+        const first = __naro_elements_by_class(id, wanted[0]).map(wrap);
+        if (wanted.length === 1) return first;
+        // Multiple class names intersect, as in the DOM.
+        return first.filter((el) => wanted.every((c) => el.classList.contains(c)));
+      },
+      getElementsByTagName(name) {
+        return __naro_elements_by_tag_name(id, String(name)).map(wrap);
+      },
+      cloneNode(deep) {
+        const clone = __naro_clone(id, !!deep);
+        if (clone < 0) return null;
+        return wrap(clone);
+      },
+      replaceChild(newNode, oldNode) {
+        if (!oldNode || oldNode.__id === undefined) return null;
+        __naro_insert_before(id, newNode.__id, oldNode.__id);
+        ceUpgradeTree(newNode.__id);
+        __naro_remove_child(id, oldNode.__id);
+        __naro_mutation("childList", id, null, newNode.__id, oldNode.__id);
+        return oldNode;
+      },
+      get outerHTML() { return __naro_outer_html(id); },
+      set outerHTML(v) {
+        const p = __naro_parent(id);
+        __naro_set_outer_html(id, String(v));
+        if (p >= 0) ceUpgradeTree(p);
+        __naro_mutation("childList", p < 0 ? id : p, null, -1, id);
+      },
+      insertAdjacentText(position, text) {
+        const node = __naro_insert_adjacent_text(id, String(position), String(text));
+        if (node < 0) return;
+        const pos = String(position).toLowerCase();
+        const host = pos === "beforebegin" || pos === "afterend" ? __naro_parent(id) : id;
+        if (host < 0) return;
+        __naro_mutation("childList", host, null, node, -1);
       },
       get dataset() {
         // `data-user-id` <-> `userId`, per the DOMStringMap rules.
@@ -507,12 +604,27 @@ const BOOTSTRAP: &str = r#"
       return wrap(id);
     },
     createTextNode: (text) => wrap(__naro_create_text(String(text))),
+    createDocumentFragment: () => wrap(__naro_create_fragment()),
+    getElementsByClassName: (name) => {
+      const wanted = String(name).split(/\s+/).filter(Boolean);
+      if (wanted.length === 0) return [];
+      const first = __naro_elements_by_class(-1, wanted[0]).map(wrap);
+      return wanted.length === 1
+        ? first
+        : first.filter((el) => wanted.every((c) => el.classList.contains(c)));
+    },
+    getElementsByTagName: (name) => __naro_elements_by_tag_name(-1, String(name)).map(wrap),
     get body() { return wrap(__naro_body()); },
     get head() { return wrap(__naro_head()); },
     get documentElement() { return wrap(__naro_root()); },
     get title() { return __naro_doc_title(); },
-    set title(v) { __naro_set_doc_title(String(v)); }
+    set title(v) { __naro_set_doc_title(String(v)); },
+    // `loading` until the parser is done, `interactive` while the
+    // `DOMContentLoaded` handlers run, `complete` afterwards.
+    get readyState() { return __naro_ready_state(); }
   };
+  globalThis.DocumentFragment = function DocumentFragment() {};
+  globalThis.Node = { ELEMENT_NODE: 1, TEXT_NODE: 3, DOCUMENT_NODE: 9, DOCUMENT_FRAGMENT_NODE: 11 };
   globalThis.console = {
     log: (...a) => __naro_log(a.map(String).join(" ")),
     error: (...a) => __naro_log(a.map(String).join(" "))
@@ -532,37 +644,419 @@ const BOOTSTRAP: &str = r#"
     platform: "",
     onLine: true
   };
-  // `location` is derived from the document URL the engine loaded. Scripts
-  // read `location.search`/`hash` for query-string handling; without it any
-  // such script dies on `undefined`.
-  globalThis.location = (function () {
-    const href = __naro_url();
-    const split = (marker) => {
-      const i = href.indexOf(marker);
-      return i < 0 ? "" : href.slice(i);
-    };
-    const beforeQuery = href.split("?")[0].split('#')[0];
-    const scheme = beforeQuery.indexOf("://");
-    const rest = scheme < 0 ? beforeQuery : beforeQuery.slice(scheme + 3);
-    const slash = rest.indexOf("/");
-    const host = slash < 0 ? rest : rest.slice(0, slash);
+  // `location` is a live view of the document URL: `pushState` rewrites the
+  // URL, so every field is re-read instead of captured once at bootstrap.
+  const urlParts = (input, base) => {
+    const p = __naro_url_parts(
+      String(input === undefined || input === null ? "" : input),
+      String(base === undefined || base === null ? "" : base)
+    );
     return {
-      href: href,
-      search: split("?").split('#')[0],
-      hash: split('#'),
-      protocol: scheme < 0 ? "" : href.slice(0, scheme + 1),
-      host: host,
-      hostname: host.split(":")[0],
-      port: host.indexOf(":") < 0 ? "" : host.slice(host.indexOf(":") + 1),
-      pathname: slash < 0 ? "/" : rest.slice(slash).split("?")[0].split('#')[0],
-      origin: scheme < 0 ? "" : href.slice(0, scheme + 3) + host,
+      href: p[0], origin: p[1], protocol: p[2], host: p[3], hostname: p[4],
+      port: p[5], pathname: p[6], search: p[7], hash: p[8]
+    };
+  };
+  globalThis.__urlParts = urlParts;
+
+  globalThis.location = (function () {
+    const read = () => urlParts(__naro_url());
+    // `assign`/`replace`/`reload` are navigation, which the engine owns; a
+    // no-op keeps a page that branches on `location.href` from dying.
+    const api = {
       reload: function () {},
       assign: function () {},
       replace: function () {},
-      toString: function () { return href; }
+      toString: function () { return read().href; }
+    };
+    return new Proxy(api, {
+      get: (t, k) => (typeof k === "string" && !(k in t)) ? read()[k] : t[k],
+      has: (t, k) => (k in t) || (typeof k === "string" && k in read())
+    });
+  })();
+
+  // --- Event classes -----------------------------------------------------
+  // One prototype chain, so `instanceof` works and a page can build its own
+  // event objects. Dispatch always walks the whole ancestor path: `bubbles`
+  // is recorded and reported but not used to cut propagation, because the
+  // engine's own synthetic events rely on reaching the document.
+  class Event {
+    constructor(type, init) {
+      init = init || {};
+      this.type = String(type);
+      this.bubbles = !!init.bubbles;
+      this.cancelable = !!init.cancelable;
+      this.composed = !!init.composed;
+      this.defaultPrevented = false;
+      this.target = null;
+      this.currentTarget = null;
+      this.eventPhase = 0;
+      this.timeStamp = Date.now();
+      this.isTrusted = false;
+      this.__stop = false;
+      this.__stopImmediate = false;
+      this.__path = [];
+    }
+    preventDefault() { this.defaultPrevented = true; }
+    stopPropagation() { this.__stop = true; }
+    stopImmediatePropagation() { this.__stop = true; this.__stopImmediate = true; }
+    composedPath() { return this.__path.slice(); }
+    get returnValue() { return !this.defaultPrevented; }
+    set returnValue(v) { if (!v) this.defaultPrevented = true; }
+    get srcElement() { return this.target; }
+  }
+  class CustomEvent extends Event {
+    constructor(type, init) {
+      super(type, init);
+      this.detail = init && init.detail !== undefined ? init.detail : null;
+    }
+  }
+  class UIEvent extends Event {
+    constructor(type, init) {
+      super(type, init);
+      init = init || {};
+      this.detail = Number(init.detail) || 0;
+      this.view = globalThis;
+    }
+  }
+  class MouseEvent extends UIEvent {
+    constructor(type, init) {
+      super(type, init);
+      init = init || {};
+      this.clientX = Number(init.clientX) || 0;
+      this.clientY = Number(init.clientY) || 0;
+      this.screenX = Number(init.screenX) || 0;
+      this.screenY = Number(init.screenY) || 0;
+      this.pageX = this.clientX;
+      this.pageY = this.clientY;
+      this.button = Number(init.button) || 0;
+      this.buttons = Number(init.buttons) || 0;
+      this.altKey = !!init.altKey;
+      this.ctrlKey = !!init.ctrlKey;
+      this.shiftKey = !!init.shiftKey;
+      this.metaKey = !!init.metaKey;
+      this.relatedTarget = init.relatedTarget || null;
+    }
+  }
+  class KeyboardEvent extends UIEvent {
+    constructor(type, init) {
+      super(type, init);
+      init = init || {};
+      this.key = init.key === undefined ? "" : String(init.key);
+      this.code = init.code === undefined ? "" : String(init.code);
+      this.repeat = !!init.repeat;
+      this.altKey = !!init.altKey;
+      this.ctrlKey = !!init.ctrlKey;
+      this.shiftKey = !!init.shiftKey;
+      this.metaKey = !!init.metaKey;
+      this.keyCode = Number(init.keyCode) || 0;
+      this.which = this.keyCode;
+    }
+  }
+  class FocusEvent extends UIEvent {
+    constructor(type, init) {
+      super(type, init);
+      this.relatedTarget = (init && init.relatedTarget) || null;
+    }
+  }
+  class InputEvent extends UIEvent {
+    constructor(type, init) {
+      super(type, init);
+      init = init || {};
+      this.data = init.data === undefined ? null : init.data;
+      this.inputType = init.inputType === undefined ? "" : String(init.inputType);
+      this.isComposing = !!init.isComposing;
+    }
+  }
+  globalThis.Event = Event;
+  globalThis.CustomEvent = CustomEvent;
+  globalThis.UIEvent = UIEvent;
+  globalThis.MouseEvent = MouseEvent;
+  globalThis.KeyboardEvent = KeyboardEvent;
+  globalThis.FocusEvent = FocusEvent;
+  globalThis.InputEvent = InputEvent;
+
+  // --- computed style ----------------------------------------------------
+  // `getComputedStyle` reports the cascade the renderer actually used: the
+  // engine hands its own `ComputedStyle` vector to the session, so a page and
+  // the paint pass can never disagree.
+  const camelToKebab = (k) => (k.startsWith("--") ? k : k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase()));
+  globalThis.getComputedStyle = function (el, pseudoElement) {
+    const id = el && el.__id !== undefined ? el.__id : -1;
+    const read = (prop) => {
+      const v = __naro_computed(id, String(prop));
+      return v === null || v === undefined ? "" : v;
+    };
+    const api = {
+      getPropertyValue: (prop) => read(camelToKebab(String(prop))),
+      get cssText() { return ""; }
+    };
+    return new Proxy(api, {
+      get: (t, k) => {
+        if (typeof k !== "string") return t[k];
+        if (k in t) return t[k];
+        return read(camelToKebab(k));
+      }
+    });
+  };
+
+  // --- media queries -----------------------------------------------------
+  // `(min-width: Npx)` / `(max-width: Npx)` (and the height pair) are
+  // evaluated against the layout viewport; any other feature never matches,
+  // which is what a browser does for a feature it does not know. The result is
+  // a snapshot: there is no re-evaluation on resize.
+  globalThis.matchMedia = function (query) {
+    const text = String(query === undefined || query === null ? "" : query);
+    const viewport = __naro_viewport();
+    const evaluate = () => {
+      const clauses = text.toLowerCase().replace(/^\s*only\s+/, "").split(/\s+and\s+/);
+      for (const raw of clauses) {
+        const clause = raw.trim();
+        if (clause === "" || clause === "all" || clause === "screen") continue;
+        const m = /^\(\s*(min|max)-(width|height)\s*:\s*([\d.]+)px\s*\)$/.exec(clause);
+        if (!m) return false;
+        const limit = parseFloat(m[3]);
+        const actual = m[2] === "width" ? viewport[0] : viewport[1];
+        if (m[1] === "min" ? actual < limit : actual > limit) return false;
+      }
+      return true;
+    };
+    const listeners = [];
+    return {
+      media: text,
+      matches: evaluate(),
+      onchange: null,
+      addEventListener(type, fn) { if (type === "change" && typeof fn === "function") listeners.push(fn); },
+      removeEventListener(type, fn) {
+        const i = listeners.indexOf(fn);
+        if (i >= 0) listeners.splice(i, 1);
+      },
+      addListener(fn) { this.addEventListener("change", fn); },
+      removeListener(fn) { this.removeEventListener("change", fn); },
+      dispatchEvent() { return true; }
+    };
+  };
+
+  // --- URL and URLSearchParams -------------------------------------------
+  const percentEncode = (s) => encodeURIComponent(String(s));
+  const percentDecode = (s) => {
+    try { return decodeURIComponent(String(s).replace(/\+/g, " ")); }
+    catch (e) { return String(s); }
+  };
+
+  class URLSearchParams {
+    constructor(init) {
+      this.__pairs = [];
+      if (init === undefined || init === null) return;
+      if (typeof init === "string") {
+        const text = init.startsWith("?") ? init.slice(1) : init;
+        if (!text) return;
+        for (const chunk of text.split("&")) {
+          if (!chunk) continue;
+          const eq = chunk.indexOf("=");
+          this.__pairs.push([
+            percentDecode(eq < 0 ? chunk : chunk.slice(0, eq)),
+            eq < 0 ? "" : percentDecode(chunk.slice(eq + 1))
+          ]);
+        }
+      } else if (init instanceof URLSearchParams) {
+        for (const pair of init.__pairs) this.__pairs.push([pair[0], pair[1]]);
+      } else if (Array.isArray(init)) {
+        for (const pair of init) this.__pairs.push([String(pair[0]), String(pair[1])]);
+      } else if (typeof init === "object") {
+        for (const key of Object.keys(init)) this.__pairs.push([key, String(init[key])]);
+      }
+    }
+    get size() { return this.__pairs.length; }
+    append(k, v) { this.__pairs.push([String(k), String(v)]); }
+    set(k, v) {
+      const key = String(k);
+      const i = this.__pairs.findIndex((p) => p[0] === key);
+      if (i < 0) { this.__pairs.push([key, String(v)]); return; }
+      // `set` keeps the first position and drops the duplicates.
+      this.__pairs[i] = [key, String(v)];
+      this.__pairs = this.__pairs.filter((p, idx) => idx <= i || p[0] !== key);
+    }
+    get(k) {
+      const key = String(k);
+      const hit = this.__pairs.find((p) => p[0] === key);
+      return hit ? hit[1] : null;
+    }
+    getAll(k) {
+      const key = String(k);
+      return this.__pairs.filter((p) => p[0] === key).map((p) => p[1]);
+    }
+    has(k) {
+      const key = String(k);
+      return this.__pairs.some((p) => p[0] === key);
+    }
+    delete(k) {
+      const key = String(k);
+      this.__pairs = this.__pairs.filter((p) => p[0] !== key);
+    }
+    sort() { this.__pairs.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)); }
+    forEach(fn, thisArg) { for (const pair of this.__pairs) fn.call(thisArg, pair[1], pair[0], this); }
+    keys() { return this.__pairs.map((p) => p[0])[Symbol.iterator](); }
+    values() { return this.__pairs.map((p) => p[1])[Symbol.iterator](); }
+    entries() { return this.__pairs.map((p) => p.slice())[Symbol.iterator](); }
+    [Symbol.iterator]() { return this.entries(); }
+    toString() {
+      return this.__pairs.map((p) => percentEncode(p[0]) + "=" + percentEncode(p[1])).join("&");
+    }
+  }
+
+  class URL {
+    constructor(url, base) {
+      const raw = String(url);
+      const hasBase = base !== undefined && base !== null;
+      // A relative URL without a base is a `TypeError`, as in the DOM.
+      if (!hasBase && !/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+        throw new TypeError("URL inválida sem base: " + raw);
+      }
+      const parts = urlParts(raw, hasBase ? String(base) : "");
+      if (!parts.href) throw new TypeError("URL inválida: " + raw);
+      this.__p = parts;
+    }
+    static canParse(url, base) {
+      try { new URL(url, base); return true; } catch (e) { return false; }
+    }
+    get href() { return this.__p.href; }
+    set href(v) { this.__p = urlParts(String(v), ""); }
+    get origin() { return this.__p.origin; }
+    get protocol() { return this.__p.protocol; }
+    get host() { return this.__p.host; }
+    get hostname() { return this.__p.hostname; }
+    get port() { return this.__p.port; }
+    get pathname() { return this.__p.pathname; }
+    set pathname(v) {
+      const text = String(v);
+      const path = text.startsWith("/") ? text : "/" + text;
+      this.__p = urlParts(this.__p.origin + path + this.__p.search + this.__p.hash, "");
+    }
+    get search() { return this.__p.search; }
+    set search(v) {
+      const text = String(v);
+      const query = text === "" ? "" : (text.startsWith("?") ? text : "?" + text);
+      this.__p = urlParts(this.__p.href.split("#")[0].split("?")[0] + query + this.__p.hash, "");
+    }
+    get hash() { return this.__p.hash; }
+    set hash(v) {
+      const text = String(v);
+      const fragment = text === "" ? "" : (text.startsWith("#") ? text : "#" + text);
+      this.__p = urlParts(this.__p.href.split("#")[0] + fragment, "");
+    }
+    get searchParams() { return new URLSearchParams(this.__p.search); }
+    toString() { return this.__p.href; }
+    toJSON() { return this.__p.href; }
+  }
+  globalThis.URL = URL;
+  globalThis.URLSearchParams = URLSearchParams;
+
+  // --- text encoding -----------------------------------------------------
+  class TextEncoder {
+    constructor() { this.encoding = "utf-8"; }
+    encode(text) {
+      return new Uint8Array(__naro_utf8_encode(text === undefined ? "" : String(text)));
+    }
+  }
+  class TextDecoder {
+    constructor(label, options) {
+      this.encoding = String(label === undefined || label === null ? "utf-8" : label).toLowerCase();
+      this.fatal = !!(options && options.fatal);
+      this.ignoreBOM = !!(options && options.ignoreBOM);
+    }
+    decode(input) {
+      if (input === undefined || input === null) return "";
+      return __naro_utf8_decode(Array.from(input));
+    }
+  }
+  globalThis.TextEncoder = TextEncoder;
+  globalThis.TextDecoder = TextDecoder;
+
+  // --- base64 ------------------------------------------------------------
+  // Latin-1 only, like `btoa`: a code unit above 255 throws.
+  const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  globalThis.btoa = function (input) {
+    const text = String(input);
+    for (let i = 0; i < text.length; i++) {
+      if (text.charCodeAt(i) > 255) throw new Error("InvalidCharacterError: btoa");
+    }
+    let out = "";
+    for (let i = 0; i < text.length; i += 3) {
+      const c1 = text.charCodeAt(i);
+      const has2 = i + 1 < text.length;
+      const has3 = i + 2 < text.length;
+      const c2 = has2 ? text.charCodeAt(i + 1) : 0;
+      const c3 = has3 ? text.charCodeAt(i + 2) : 0;
+      const n = (c1 << 16) | (c2 << 8) | c3;
+      out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63]
+        + (has2 ? B64[(n >> 6) & 63] : "=")
+        + (has3 ? B64[n & 63] : "=");
+    }
+    return out;
+  };
+  globalThis.atob = function (input) {
+    const text = String(input).replace(/[^A-Za-z0-9+/=]/g, "");
+    let out = "";
+    for (let i = 0; i < text.length; i += 4) {
+      const c1 = B64.indexOf(text[i]);
+      const c2 = B64.indexOf(text[i + 1] || "=");
+      const c3 = text[i + 2] || "=";
+      const c4 = text[i + 3] || "=";
+      const n = ((c1 < 0 ? 0 : c1) << 18)
+        | ((c2 < 0 ? 0 : c2) << 12)
+        | ((c3 === "=" ? 0 : B64.indexOf(c3)) << 6)
+        | (c4 === "=" ? 0 : B64.indexOf(c4));
+      out += String.fromCharCode((n >> 16) & 255);
+      if (c3 !== "=") out += String.fromCharCode((n >> 8) & 255);
+      if (c4 !== "=") out += String.fromCharCode(n & 255);
+    }
+    return out;
+  };
+
+  // --- history -----------------------------------------------------------
+  // The engine owns the history vector; script queues a request and the engine
+  // applies it on its next flush. The states array is indexed by the engine's
+  // own index, so entries created by navigation read back as `null`.
+  globalThis.history = (function () {
+    const states = [];
+    const popState = () => {
+      setTimeout(function () {
+        const index = __naro_history_index();
+        const ev = new Event("popstate");
+        ev.state = index >= 0 && index < states.length ? states[index] : null;
+        const root = __naro_root();
+        __naro_dispatch(root, ev, [root]);
+      }, 0);
+    };
+    return {
+      get length() { return Math.max(states.length, __naro_history_index() + 1); },
+      get state() {
+        const index = __naro_history_index();
+        return index >= 0 && index < states.length ? states[index] : null;
+      },
+      pushState(state, title, url) {
+        const index = __naro_history_index() + 1;
+        __naro_history_push(url === undefined || url === null ? "" : String(url), false);
+        states[index] = state === undefined ? null : state;
+      },
+      replaceState(state, title, url) {
+        const index = __naro_history_index();
+        __naro_history_push(url === undefined || url === null ? "" : String(url), true);
+        if (index >= 0) states[index] = state === undefined ? null : state;
+      },
+      back() { __naro_history_travel(-1); popState(); },
+      forward() { __naro_history_travel(1); popState(); },
+      go(delta) { __naro_history_travel(Number(delta) || 0); popState(); }
     };
   })();
-  globalThis.CustomEvent = function (type) { this.type = String(type); };
+
+  // `JSON` cannot carry functions, Dates or cyclic graphs; documented
+  // limitation of the only deep clone available without a structured-clone
+  // implementation in QuickJS.
+  globalThis.structuredClone = function (value) {
+    if (value === undefined) return undefined;
+    return JSON.parse(JSON.stringify(value));
+  };
 
   // --- Custom Elements (minimal) ---------------------------------------
   // `define` registers a constructor and upgrades the elements that already
@@ -729,20 +1223,20 @@ const BOOTSTRAP: &str = r#"
     const i = listeners.findIndex((l) => l.id === id && l.type === type && l.fn === fn);
     if (i >= 0) listeners.splice(i, 1);
   };
-  globalThis.__naro_dispatch = function (id, type, path) {
+  globalThis.__naro_dispatch = function (id, event, path) {
     // `path` is [target, parent, ..., root]: capture, target, then bubbling.
-    const ev = {
-      type: type,
-      target: wrap(id),
-      currentTarget: null,
-      eventPhase: 0,
-      defaultPrevented: false,
-      __stop: false,
-      __stopImmediate: false,
-      preventDefault() { this.defaultPrevented = true; },
-      stopPropagation() { this.__stop = true; },
-      stopImmediatePropagation() { this.__stop = true; this.__stopImmediate = true; }
-    };
+    // A string is the engine's shorthand for a plain `Event`; a page that
+    // built its own event object keeps its identity and its own fields.
+    const ev = (event !== null && typeof event === "object") ? event : new Event(event);
+    if (ev.target === undefined || ev.target === null) ev.target = wrap(id);
+    ev.__path = path.map(wrap);
+    if (ev.defaultPrevented === undefined) ev.defaultPrevented = false;
+    if (ev.__stop === undefined) ev.__stop = false;
+    if (ev.__stopImmediate === undefined) ev.__stopImmediate = false;
+    if (typeof ev.preventDefault !== "function") ev.preventDefault = function () { this.defaultPrevented = true; };
+    if (typeof ev.stopPropagation !== "function") ev.stopPropagation = function () { this.__stop = true; };
+    if (typeof ev.stopImmediatePropagation !== "function") ev.stopImmediatePropagation = function () { this.__stop = true; this.__stopImmediate = true; };
+    const type = ev.type;
     const snapshot = listeners.slice();
     const run = (nodeId, phase) => {
       ev.eventPhase = phase;
@@ -799,8 +1293,10 @@ const BOOTSTRAP: &str = r#"
       const t = timers.splice(idx, 1)[0];
       try { t.fn(...t.args); } catch (e) { report(e); }
       ran++;
-      // Zero-delay chains must not spin forever inside one host call.
-      if (t.due >= now) break;
+      // A zero-delay chain must not spin forever inside one host call. The
+      // wall-clock budget above and the `ran < 100` cap are what stop it; an
+      // extra "same millisecond" break would silently drop a second timer
+      // queued in the same millisecond as the first, which real pages do.
     }
     return ran;
   };
@@ -893,7 +1389,7 @@ const BOOTSTRAP: &str = r#"
     __naro_remove(__naro_root(), String(type), fn);
   };
 })();
-"#;
+"##;
 
 /// A live JavaScript realm bound to one document.
 pub struct JsSession {
@@ -921,7 +1417,7 @@ impl JsSession {
         scripts: &[(String, String)],
         geometry: Vec<Option<ElementBox>>,
     ) -> (Option<JsSession>, ScriptOutcome) {
-        JsSession::start_measured(doc, scripts, geometry, None, "")
+        JsSession::start_measured(doc, scripts, geometry, Vec::new(), None, "")
     }
 
     /// Same as [`JsSession::start_with_geometry`], plus a callback the session
@@ -935,7 +1431,8 @@ impl JsSession {
         doc: Document,
         scripts: &[(String, String)],
         geometry: Vec<Option<ElementBox>>,
-        measure: Option<&mut dyn FnMut(&Document) -> Vec<Option<ElementBox>>>,
+        computed: Vec<naro_css::ComputedStyle>,
+        measure: Option<&mut dyn FnMut(&Document) -> (Vec<Option<ElementBox>>, Vec<naro_css::ComputedStyle>)>,
         url: &str,
     ) -> (Option<JsSession>, ScriptOutcome) {
         let dom = Rc::new(RefCell::new(Dom {
@@ -945,6 +1442,11 @@ impl JsSession {
             value_dirty: Vec::new(),
             invalidation: Invalidation::default(),
             geometry,
+            computed,
+            ready_state: "loading",
+            history_ops: Vec::new(),
+            history_index: 0,
+            viewport: (1000.0, 700.0),
             url: url.to_string(),
         }));
         let runtime = match Runtime::new() {
@@ -987,18 +1489,24 @@ impl JsSession {
         }
 
         let root = session.root_id();
+        // `loading` while the parser runs, `interactive` for the
+        // `DOMContentLoaded` handlers, `complete` once they and the
+        // microtasks they queued are done.
+        session.set_ready_state("interactive");
         out.merge(session.call_js("DOMContentLoaded", |ctx| {
             let f = ctx.globals().get::<_, Function>("__naro_dispatch")?;
             f.call::<_, ()>((root as i64, "DOMContentLoaded", vec![root as i64]))
         }));
         out.merge(session.drain_microtasks());
+        session.set_ready_state("complete");
         if let Some(measure) = measure {
             // Re-measure once the load handlers have run: a timer that reads
             // geometry right after `DOMContentLoaded` must not see the tree as
             // it was before those handlers touched it.
             if session.has_pending_timers() {
-                let boxes = measure(&session.dom.borrow().doc);
+                let (boxes, styles) = measure(&session.dom.borrow().doc);
                 session.set_geometry(boxes);
+                session.set_computed(styles);
             }
         }
         out.merge(session.run_timers(50));
@@ -1122,6 +1630,40 @@ impl JsSession {
     /// `offset*`/`client*` properties. Called by the engine after every layout.
     pub fn set_geometry(&self, boxes: Vec<Option<ElementBox>>) {
         self.dom.borrow_mut().geometry = boxes;
+    }
+
+    /// Replace the computed styles behind `getComputedStyle`. Called by the
+    /// engine next to [`JsSession::set_geometry`], so a page and the renderer
+    /// can never disagree about a cascaded value.
+    pub fn set_computed(&self, styles: Vec<naro_css::ComputedStyle>) {
+        self.dom.borrow_mut().computed = styles;
+    }
+
+    /// Update `document.readyState`.
+    pub fn set_ready_state(&self, state: &'static str) {
+        self.dom.borrow_mut().ready_state = state;
+    }
+
+    /// Update the URL `location` reports, without reloading anything.
+    pub fn set_url(&self, url: &str) {
+        self.dom.borrow_mut().url = url.to_string();
+    }
+
+    /// Record the viewport the page was laid out at, so `matchMedia` can
+    /// evaluate `min-width`/`max-width` the way the cascade already does.
+    pub fn set_viewport(&self, width: f32, height: f32) {
+        let mut dom = self.dom.borrow_mut();
+        dom.viewport = (width, height);
+    }
+
+    /// Record the current entry index of the engine's history.
+    pub fn set_history_index(&self, index: i64) {
+        self.dom.borrow_mut().history_index = index;
+    }
+
+    /// History changes page script queued since the last drain.
+    pub fn take_history_ops(&self) -> Vec<HistoryOp> {
+        std::mem::take(&mut self.dom.borrow_mut().history_ops)
     }
 
     /// Pending invalidation produced by DOM mutations.
@@ -1489,12 +2031,8 @@ fn register(ctx: &rquickjs::Ctx<'_>, dom: &Rc<RefCell<Dom>>) -> rquickjs::Result
                 return;
             }
             let mut dom = d.borrow_mut();
-            dom.doc.detach(child as usize);
-            if reference >= 0 {
-                dom.doc.attach_before(parent as usize, child as usize, reference as usize);
-            } else {
-                dom.doc.attach(parent as usize, child as usize);
-            }
+            let reference = if reference >= 0 { Some(reference as usize) } else { None };
+            insert_node(&mut dom.doc, parent as usize, child as usize, reference);
         })?,
     )?;
 
@@ -1553,8 +2091,7 @@ fn register(ctx: &rquickjs::Ctx<'_>, dom: &Rc<RefCell<Dom>>) -> rquickjs::Result
                 return;
             }
             let mut dom = d.borrow_mut();
-            dom.doc.detach(child as usize);
-            dom.doc.attach(parent as usize, child as usize);
+            insert_node(&mut dom.doc, parent as usize, child as usize, None);
         })?,
     )?;
 
@@ -1705,7 +2242,9 @@ fn register(ctx: &rquickjs::Ctx<'_>, dom: &Rc<RefCell<Dom>>) -> rquickjs::Result
                         dom.doc.push_detached_text(&text)
                     }
                     NodeData::Element { .. } => graft(&mut dom.doc, &fragment, child, target),
-                    NodeData::Document | NodeData::ShadowRoot { .. } => continue,
+                    NodeData::Document | NodeData::ShadowRoot { .. } | NodeData::Fragment => {
+                        continue
+                    }
                 };
                 grafted.push(node);
             }
@@ -1791,12 +2330,463 @@ fn register(ctx: &rquickjs::Ctx<'_>, dom: &Rc<RefCell<Dom>>) -> rquickjs::Result
         })?,
     )?;
 
+    // --- platform surface (A1) -------------------------------------------
+    // Every one of these reads state the engine already keeps: computed
+    // styles, the viewport, the URL and the history. `naro-js` never derives
+    // a value the renderer would compute differently.
+
+    let d = dom.clone();
+    globals.set(
+        "__naro_computed",
+        Function::new(ctx.clone(), move |id: i64, prop: String| -> Option<String> {
+            if id < 0 {
+                return None;
+            }
+            let dom = d.borrow();
+            let fallback;
+            let style = match dom.computed.get(id as usize) {
+                Some(style) => style,
+                // A node the engine has not styled yet (a detached element)
+                // reports the initial value, as a browser does.
+                None => {
+                    fallback = naro_css::ComputedStyle::default();
+                    &fallback
+                }
+            };
+            naro_css::computed_value(style, &prop)
+        })?,
+    )?;
+
+    let d = dom.clone();
+    globals.set(
+        "__naro_element_children",
+        Function::new(ctx.clone(), move |id: i64| -> Vec<i64> {
+            if id < 0 {
+                return Vec::new();
+            }
+            d.borrow()
+                .doc
+                .element_children(id as usize)
+                .map(|c| c as i64)
+                .collect()
+        })?,
+    )?;
+
+    let d = dom.clone();
+    globals.set(
+        "__naro_is_fragment",
+        Function::new(ctx.clone(), move |id: i64| -> bool {
+            id >= 0 && d.borrow().doc.is_fragment(id as usize)
+        })?,
+    )?;
+
+    let d = dom.clone();
+    globals.set(
+        "__naro_create_fragment",
+        Function::new(ctx.clone(), move || -> i64 {
+            d.borrow_mut().doc.push_detached_fragment() as i64
+        })?,
+    )?;
+
+    let d = dom.clone();
+    globals.set(
+        "__naro_clone",
+        Function::new(ctx.clone(), move |id: i64, deep: bool| -> i64 {
+            if id < 0 {
+                return -1;
+            }
+            let mut dom = d.borrow_mut();
+            let plan = {
+                let doc = &dom.doc;
+                clone_plan(doc, id as usize, deep)
+            };
+            match plan {
+                Some(plan) => {
+                    let node = materialize(&mut dom.doc, &plan);
+                    // A clone is never in the tree, even though the arena
+                    // needs a placeholder parent while it is built.
+                    dom.doc.detach(node);
+                    node as i64
+                }
+                None => -1,
+            }
+        })?,
+    )?;
+
+    let d = dom.clone();
+    globals.set(
+        "__naro_elements_by_class",
+        Function::new(ctx.clone(), move |id: i64, name: String| -> Vec<i64> {
+            let dom = d.borrow();
+            let root = if id < 0 { dom.doc.root } else { id as usize };
+            let mut out = Vec::new();
+            collect_elements(&dom.doc, root, &mut out, &mut |doc, node| {
+                doc.attr(node, "class")
+                    .map(|classes| classes.split_whitespace().any(|c| c == name))
+                    .unwrap_or(false)
+            });
+            out.into_iter().map(|n| n as i64).collect()
+        })?,
+    )?;
+
+    let d = dom.clone();
+    globals.set(
+        "__naro_elements_by_tag_name",
+        Function::new(ctx.clone(), move |id: i64, name: String| -> Vec<i64> {
+            let dom = d.borrow();
+            let root = if id < 0 { dom.doc.root } else { id as usize };
+            let wanted = name.to_ascii_lowercase();
+            let any = wanted == "*";
+            let mut out = Vec::new();
+            collect_elements(&dom.doc, root, &mut out, &mut |doc, node| {
+                any || doc.tag(node).map(|t| t == wanted).unwrap_or(false)
+            });
+            out.into_iter().map(|n| n as i64).collect()
+        })?,
+    )?;
+
+    let d = dom.clone();
+    globals.set(
+        "__naro_outer_html",
+        Function::new(ctx.clone(), move |id: i64| -> String {
+            if id < 0 {
+                return String::new();
+            }
+            let dom = d.borrow();
+            let mut out = String::new();
+            serialize_node(&dom.doc, id as usize, &mut out);
+            out
+        })?,
+    )?;
+
+    let d = dom.clone();
+    globals.set(
+        "__naro_set_outer_html",
+        Function::new(ctx.clone(), move |id: i64, html: String| {
+            if id < 0 {
+                return;
+            }
+            let mut dom = d.borrow_mut();
+            let target = id as usize;
+            let parent = match dom.doc.node(target).parent {
+                Some(parent) => parent,
+                None => return,
+            };
+            let fragment = naro_html::Document::parse(&format!("<body>{html}</body>"));
+            let Some(body) = fragment.find_tag("body") else {
+                return;
+            };
+            let sources: Vec<NodeId> = fragment.children(body).to_vec();
+            let mut grafted: Vec<NodeId> = Vec::with_capacity(sources.len());
+            for child in sources {
+                match &fragment.node(child).data {
+                    NodeData::Text(text) => {
+                        let text = text.clone();
+                        grafted.push(dom.doc.push_detached_text(&text));
+                    }
+                    NodeData::Element { .. } => {
+                        grafted.push(graft(&mut dom.doc, &fragment, child, parent))
+                    }
+                    NodeData::Document | NodeData::ShadowRoot { .. } | NodeData::Fragment => {}
+                }
+            }
+            // Insert the replacements first, then drop the old node, so the
+            // order matches the source even for several top-level nodes.
+            for &node in &grafted {
+                dom.doc.detach(node);
+                dom.doc.attach_before(parent, node, target);
+            }
+            dom.doc.detach(target);
+        })?,
+    )?;
+
+    let d = dom.clone();
+    globals.set(
+        "__naro_insert_adjacent_text",
+        Function::new(ctx.clone(), move |id: i64, position: String, text: String| -> i64 {
+            if id < 0 || text.is_empty() {
+                return -1;
+            }
+            let mut dom = d.borrow_mut();
+            let target = id as usize;
+            let node = dom.doc.push_detached_text(&text);
+            let position = position.to_ascii_lowercase();
+            match position.as_str() {
+                "beforebegin" | "afterend" => {
+                    let Some(parent) = dom.doc.node(target).parent else {
+                        return -1;
+                    };
+                    if position == "beforebegin" {
+                        dom.doc.attach_before(parent, node, target);
+                    } else {
+                        dom.doc.attach_after(parent, node, target);
+                    }
+                }
+                "afterbegin" => match dom.doc.children(target).first().copied() {
+                    Some(reference) => dom.doc.attach_before(target, node, reference),
+                    None => dom.doc.attach(target, node),
+                },
+                "beforeend" => dom.doc.attach(target, node),
+                _ => return -1,
+            }
+            node as i64
+        })?,
+    )?;
+
+    let d = dom.clone();
+    globals.set(
+        "__naro_ready_state",
+        Function::new(ctx.clone(), move || -> String { d.borrow().ready_state.to_string() })?,
+    )?;
+
+    let d = dom.clone();
+    globals.set(
+        "__naro_viewport",
+        Function::new(ctx.clone(), move || -> Vec<f32> {
+            let dom = d.borrow();
+            vec![dom.viewport.0, dom.viewport.1]
+        })?,
+    )?;
+
+    let d = dom.clone();
+    globals.set(
+        "__naro_url_parts",
+        Function::new(ctx.clone(), move |input: String, base: String| -> Vec<String> {
+            // An empty `base` means "the document URL", which is what
+            // `location` and a relative `fetch` need.
+            let base = if base.is_empty() {
+                d.borrow().url.clone()
+            } else {
+                base
+            };
+            url_parts(&base, &input)
+        })?,
+    )?;
+
+    let d = dom.clone();
+    globals.set(
+        "__naro_history_push",
+        Function::new(ctx.clone(), move |url: String, replace: bool| {
+            let mut dom = d.borrow_mut();
+            // The address bar changes the moment script asks for it, exactly
+            // like a browser; the engine's own history vector catches up on
+            // its next flush. The op carries the absolute URL, because the
+            // engine should not have to resolve anything twice.
+            let mut resolved_url = String::new();
+            if !url.is_empty() {
+                let resolved = url_parts(&dom.url, &url);
+                if !resolved[0].is_empty() {
+                    dom.url = resolved[0].clone();
+                    resolved_url = resolved[0].clone();
+                }
+            }
+            if !replace {
+                dom.history_index += 1;
+            }
+            dom.history_ops.push(HistoryOp::Push {
+                url: resolved_url,
+                replace,
+            });
+        })?,
+    )?;
+
+    let d = dom.clone();
+    globals.set(
+        "__naro_history_travel",
+        Function::new(ctx.clone(), move |delta: i64| {
+            let op = match delta {
+                d if d < 0 => HistoryOp::Back,
+                d if d > 0 => HistoryOp::Forward,
+                _ => HistoryOp::Go(0),
+            };
+            d.borrow_mut().history_ops.push(op);
+        })?,
+    )?;
+
+    let d = dom.clone();
+    globals.set(
+        "__naro_history_index",
+        Function::new(ctx.clone(), move || -> i64 { d.borrow().history_index })?,
+    )?;
+
+    globals.set(
+        "__naro_utf8_encode",
+        Function::new(ctx.clone(), move |text: String| -> Vec<u8> {
+            text.into_bytes()
+        })?,
+    )?;
+
+    globals.set(
+        "__naro_utf8_decode",
+        Function::new(ctx.clone(), move |bytes: Vec<u8>| -> String {
+            String::from_utf8_lossy(&bytes).to_string()
+        })?,
+    )?;
+
     Ok(())
+}
+
+/// Insert `child` under `parent`, before `reference` when given.
+///
+/// A `DocumentFragment` is a container, not a node: inserting one moves its
+/// children and leaves it empty, which is what makes the common
+/// "build a fragment, append it once" pattern cheap.
+fn insert_node(doc: &mut Document, parent: NodeId, child: NodeId, reference: Option<NodeId>) {
+    if doc.is_fragment(child) {
+        let moved: Vec<NodeId> = doc.children(child).to_vec();
+        doc.nodes[child].children.clear();
+        for node in moved {
+            doc.detach(node);
+            match reference {
+                Some(reference) => doc.attach_before(parent, node, reference),
+                None => doc.attach(parent, node),
+            }
+        }
+        return;
+    }
+    doc.detach(child);
+    match reference {
+        Some(reference) => doc.attach_before(parent, child, reference),
+        None => doc.attach(parent, child),
+    }
+}
+
+/// A detached copy of one subtree, captured before the destination document is
+/// mutated. Cloning through a plan keeps `cloneNode` from borrowing the arena
+/// it is writing into.
+enum ClonePlan {
+    Text(String),
+    Element {
+        tag: String,
+        attrs: Vec<(String, String)>,
+        children: Vec<ClonePlan>,
+    },
+    Fragment {
+        children: Vec<ClonePlan>,
+    },
+}
+
+fn clone_plan(doc: &Document, id: NodeId, deep: bool) -> Option<ClonePlan> {
+    match &doc.node(id).data {
+        NodeData::Text(text) => Some(ClonePlan::Text(text.clone())),
+        NodeData::Element { tag, attrs } => Some(ClonePlan::Element {
+            tag: tag.clone(),
+            attrs: attrs.clone(),
+            children: if deep {
+                doc.children(id)
+                    .iter()
+                    .filter_map(|&child| clone_plan(doc, child, true))
+                    .collect()
+            } else {
+                Vec::new()
+            },
+        }),
+        NodeData::Fragment => Some(ClonePlan::Fragment {
+            children: if deep {
+                doc.children(id)
+                    .iter()
+                    .filter_map(|&child| clone_plan(doc, child, true))
+                    .collect()
+            } else {
+                Vec::new()
+            },
+        }),
+        // A shadow root is not a child of its host and cannot be cloned by
+        // `cloneNode`; the document node is not a valid argument at all.
+        NodeData::Document | NodeData::ShadowRoot { .. } => None,
+    }
+}
+
+fn materialize(dest: &mut Document, plan: &ClonePlan) -> NodeId {
+    match plan {
+        ClonePlan::Text(text) => dest.push_detached_text(text),
+        ClonePlan::Element {
+            tag,
+            attrs,
+            children,
+        } => {
+            let id = dest.push_detached_element(tag.clone(), dest.root);
+            for (name, value) in attrs {
+                dest.set_attr(id, name, value);
+            }
+            for child in children {
+                let child = materialize(dest, child);
+                dest.attach(id, child);
+            }
+            id
+        }
+        ClonePlan::Fragment { children } => {
+            let id = dest.push_detached_fragment();
+            for child in children {
+                let child = materialize(dest, child);
+                dest.attach(id, child);
+            }
+            id
+        }
+    }
+}
+
+/// Every element under `root` (excluding `root` itself) that `keep` accepts,
+/// in document order. Walks child lists only, so it never crosses into a
+/// shadow tree — the same boundary `querySelectorAll` respects.
+fn collect_elements(
+    doc: &Document,
+    root: NodeId,
+    out: &mut Vec<NodeId>,
+    keep: &mut dyn FnMut(&Document, NodeId) -> bool,
+) {
+    let mut stack: Vec<NodeId> = doc.children(root).iter().rev().copied().collect();
+    while let Some(node) = stack.pop() {
+        if doc.tag(node).is_some() && keep(doc, node) {
+            out.push(node);
+        }
+        for &child in doc.children(node).iter().rev() {
+            stack.push(child);
+        }
+    }
+}
+
+/// `[href, origin, protocol, host, hostname, port, pathname, search, hash]`
+/// for `input` resolved against `base`.
+///
+/// Parsing lives in Rust (the `url` crate) so the JS `URL` class inherits the
+/// same resolution rules the loader uses for relative links.
+fn url_parts(base: &str, input: &str) -> Vec<String> {
+    let trimmed = input.trim();
+    let parsed = match url::Url::parse(trimmed) {
+        Ok(url) => url,
+        Err(_) => match url::Url::parse(base).and_then(|b| b.join(trimmed)) {
+            Ok(url) => url,
+            Err(_) => return vec![String::new(); 9],
+        },
+    };
+    vec![
+        parsed.as_str().to_string(),
+        parsed.origin().ascii_serialization(),
+        format!("{}:", parsed.scheme()),
+        parsed.host_str().map(|h| match parsed.port() {
+            Some(port) => format!("{h}:{port}"),
+            None => h.to_string(),
+        })
+        .unwrap_or_default(),
+        parsed.host_str().unwrap_or("").to_string(),
+        parsed.port().map(|p| p.to_string()).unwrap_or_default(),
+        parsed.path().to_string(),
+        match parsed.query() {
+            Some(q) => format!("?{q}"),
+            None => String::new(),
+        },
+        match parsed.fragment() {
+            Some(f) => format!("#{f}"),
+            None => String::new(),
+        },
+    ]
 }
 
 fn text_of(doc: &Document, id: NodeId) -> String {
     let mut out = String::new();
-    let mut stack: Vec<NodeId> = doc.children(id).to_vec();
+    // Pushed in reverse so `pop` yields the children in document order.
+    let mut stack: Vec<NodeId> = doc.children(id).iter().rev().copied().collect();
     while let Some(node) = stack.pop() {
         match &doc.node(node).data {
             NodeData::Text(t) => out.push_str(t),
@@ -1833,7 +2823,7 @@ fn graft(dest: &mut Document, source: &Document, from: NodeId, parent: NodeId) -
             }
             // Parsed fragments never contain shadow roots: the parser has no
             // syntax for them, and `innerHTML` does not clone an existing one.
-            NodeData::Document | NodeData::ShadowRoot { .. } => {}
+            NodeData::Document | NodeData::ShadowRoot { .. } | NodeData::Fragment => {}
         }
     }
     new_id
@@ -1852,8 +2842,8 @@ fn serialize_node(doc: &Document, id: NodeId, out: &mut String) {
     match &doc.node(id).data {
         NodeData::Text(text) => out.push_str(text),
         // `innerHTML` serializes the light tree; a shadow root is not part of
-        // it, so there is nothing to emit.
-        NodeData::ShadowRoot { .. } | NodeData::Document => return,
+        // it, so there is nothing to emit. A fragment is not a child either.
+        NodeData::ShadowRoot { .. } | NodeData::Document | NodeData::Fragment => return,
         NodeData::Element { .. } => {
             let tag = doc.tag(id).unwrap_or("span");
             out.push('<');

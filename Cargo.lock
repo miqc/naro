@@ -931,6 +931,7 @@ dependencies = [
  "naro-css",
  "naro-html",
  "rquickjs",
+ "url",
 ]
 
 [[package]]

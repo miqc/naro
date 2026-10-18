@@ -216,6 +216,11 @@ impl Engine {
         let Some(layout) = &self.layout else { return };
         let node_count = self.doc.as_ref().map_or(0, |d| d.nodes.len());
         session.set_geometry(measure_geometry_nodes(layout, node_count));
+        // The same pass that publishes boxes publishes the cascade and the
+        // viewport, so `getComputedStyle` and `matchMedia` see exactly what
+        // layout and paint used.
+        session.set_computed(self.styles.clone());
+        session.set_viewport(self.viewport_width, self.viewport_height);
     }
 
     pub fn navigate(&mut self, url: &str, push_history: bool) -> Navigation {
@@ -359,19 +364,21 @@ impl Engine {
                 self.style_context(),
                 &self.sheet_cache,
             );
-            Some((
-                measure_geometry(
+            let geometry = measure_geometry(
+                &doc,
+                &layout_document(
                     &doc,
-                    &layout_document(
-                        &doc,
-                        &styles,
-                        &self.fonts,
-                        self.viewport_width,
-                        self.viewport_height,
-                        &self.images,
-                    ),
+                    &styles,
+                    &self.fonts,
+                    self.viewport_width,
+                    self.viewport_height,
+                    &self.images,
                 ),
-            ))
+            );
+            // The cascade travels with the boxes: a script that reads
+            // `getComputedStyle` during load must see the same values the
+            // renderer will use, not the initial ones.
+            Some((geometry, styles))
         };
         let width = self.viewport_width;
         let context = self.style_context();
@@ -379,16 +386,17 @@ impl Engine {
         let images = &self.images;
         // Lets the session re-measure after the load handlers ran, so a timer
         // that reads geometry is not looking at the pre-handler tree.
-        let mut measure = |doc: &Document| -> Vec<Option<ElementBox>> {
+        let mut measure = |doc: &Document| -> (Vec<Option<ElementBox>>, Vec<ComputedStyle>) {
             let (styles, _) = compute_page_styles(doc, url, width, context, &self.sheet_cache);
             let layout = layout_document(doc, &styles, fonts, width, context.viewport_height, images);
-            measure_geometry(doc, &layout)
+            (measure_geometry(doc, &layout), styles)
         };
         let (session, js) = match provisional {
-            Some((geometry,)) => naro_js::JsSession::start_measured(
+            Some((geometry, styles)) => naro_js::JsSession::start_measured(
                 doc,
                 &scripts,
                 geometry,
+                styles,
                 Some(&mut measure),
                 url,
             ),
@@ -396,6 +404,11 @@ impl Engine {
         };
         self.js = js;
         self.js_session = session;
+        if let Some(session) = &self.js_session {
+            session.set_url(&self.display_url);
+            session.set_history_index(self.history_index as i64);
+            session.set_viewport(self.viewport_width, self.viewport_height);
+        }
         let doc = match &self.js_session {
             Some(session) => session.snapshot(),
             None => return,
@@ -758,6 +771,16 @@ p {{ margin: 8px 0; line-height: 1.5; }}
     /// with nothing pending is a no-op, which is what keeps a MutationObserver
     /// callback from looping.
     pub fn flush(&mut self) -> bool {
+        // `history.pushState` and friends are queued by script and applied
+        // here, before the invalidation work: a pushState alone changes the
+        // URL without touching the document.
+        let ops = match &self.js_session {
+            Some(session) => session.take_history_ops(),
+            None => Vec::new(),
+        };
+        for op in ops {
+            self.apply_history_op(op);
+        }
         let mut invalidation = std::mem::take(&mut self.dirty);
         if let Some(session) = &self.js_session {
             invalidation.merge(session.take_invalidation());
@@ -810,6 +833,58 @@ p {{ margin: 8px 0; line-height: 1.5; }}
         // Keeping the flag explicit is what lets a future partial repaint be
         // added without touching the invalidation rules.
         true
+    }
+
+    /// Apply one queued `history` request: move the index, rewrite the URL.
+    ///
+    /// No document is fetched and nothing is re-rendered — that is the point
+    /// of the History API, and it is what lets a single-page app change the
+    /// address bar without losing its state.
+    fn apply_history_op(&mut self, op: naro_js::HistoryOp) {
+        match op {
+            naro_js::HistoryOp::Push { url, replace } => {
+                let target = if url.is_empty() {
+                    self.display_url.clone()
+                } else {
+                    url
+                };
+                if replace {
+                    if self.history.is_empty() {
+                        self.history.push(target.clone());
+                        self.history_index = 0;
+                    } else {
+                        self.history[self.history_index] = target.clone();
+                    }
+                } else {
+                    self.history.truncate(self.history_index + 1);
+                    self.history.push(target.clone());
+                    self.history_index = self.history.len() - 1;
+                }
+                self.display_url = target;
+            }
+            naro_js::HistoryOp::Back => {
+                if self.history_index > 0 {
+                    self.history_index -= 1;
+                }
+            }
+            naro_js::HistoryOp::Forward => {
+                if self.history_index + 1 < self.history.len() {
+                    self.history_index += 1;
+                }
+            }
+            naro_js::HistoryOp::Go(delta) => {
+                let last = self.history.len().saturating_sub(1);
+                let target = (self.history_index as i64 + delta).max(0) as usize;
+                self.history_index = target.min(last);
+            }
+        }
+        if let Some(url) = self.history.get(self.history_index) {
+            self.display_url = url.clone();
+        }
+        if let Some(session) = &self.js_session {
+            session.set_history_index(self.history_index as i64);
+            session.set_url(&self.display_url);
+        }
     }
 
     fn control_value(&self, node: usize) -> String {
@@ -1223,8 +1298,9 @@ p {{ margin: 8px 0; line-height: 1.5; }}
                 let _ = attrs;
                 out.push_str(&format!("{indent}{tag}{id_attr}{classes}\n"));
             }
-            // A shadow root is printed under its host, never as a child.
-            NodeData::ShadowRoot { .. } => {}
+            // A shadow root is printed under its host, never as a child; a
+            // fragment is not part of the tree at all.
+            NodeData::ShadowRoot { .. } | NodeData::Fragment => {}
             NodeData::Text(text) => {
                 let trimmed: String = text.chars().take(60).collect();
                 out.push_str(&format!("{indent}\"{trimmed}\"\n"));

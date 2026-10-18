@@ -26,6 +26,11 @@ pub enum NodeData {
     /// `parent` is the host, so inherited properties flow in and
     /// `getRootNode()` works.
     ShadowRoot { host: NodeId, mode: ShadowMode },
+    /// A `DocumentFragment`: a tagless node that owns children without ever
+    /// being part of a tree. It has no parent until someone inserts its
+    /// children elsewhere, which is why every walk treats it like a shadow
+    /// root — it is never in a child list, so those arms are unreachable.
+    Fragment,
 }
 
 #[derive(Clone, Debug)]
@@ -263,9 +268,9 @@ impl Document {
             match &self.nodes[child].data {
                 NodeData::Text(text) => out.push_str(text),
                 NodeData::Element { .. } => self.collect_text(child, out),
-                // A shadow root is never in a child list, so this arm is
-                // unreachable; it exists to keep the match exhaustive.
-                NodeData::Document | NodeData::ShadowRoot { .. } => {}
+                // A shadow root and a fragment are never in a child list, so
+                // these arms are unreachable; they keep the match exhaustive.
+                NodeData::Document | NodeData::ShadowRoot { .. } | NodeData::Fragment => {}
             }
         }
     }
@@ -332,6 +337,24 @@ impl Document {
             children: Vec::new(),
         });
         id
+    }
+
+    /// Create an empty `DocumentFragment`, attached to nothing.
+    ///
+    /// Its children live in the same arena as every other node, so inserting
+    /// them elsewhere is a re-parent, not a copy.
+    pub fn push_detached_fragment(&mut self) -> NodeId {
+        let id = self.nodes.len();
+        self.nodes.push(Node {
+            data: NodeData::Fragment,
+            parent: None,
+            children: Vec::new(),
+        });
+        id
+    }
+
+    pub fn is_fragment(&self, id: NodeId) -> bool {
+        matches!(self.nodes.get(id).map(|n| &n.data), Some(NodeData::Fragment))
     }
 
     /// Insert `child` immediately after `reference`, under `parent`.

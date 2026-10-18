@@ -413,7 +413,9 @@ fn build_children_into(
             }
             // A shadow root is never in a child list; `composed_children`
             // returns its children instead.
-            naro_html::NodeData::ShadowRoot { .. } | naro_html::NodeData::Document => {}
+            naro_html::NodeData::ShadowRoot { .. }
+            | naro_html::NodeData::Document
+            | naro_html::NodeData::Fragment => {}
             naro_html::NodeData::Element { .. } => {
                 let tag = doc.tag(child).unwrap_or("");
                 if is_hidden_tag(tag) || is_hidden_node(doc, child) {
@@ -546,7 +548,9 @@ fn flatten_inline(
                     node: child,
                 }));
             }
-            naro_html::NodeData::ShadowRoot { .. } | naro_html::NodeData::Document => {}
+            naro_html::NodeData::ShadowRoot { .. }
+            | naro_html::NodeData::Document
+            | naro_html::NodeData::Fragment => {}
             naro_html::NodeData::Element { .. } => {
                 let tag = doc.tag(child).unwrap_or("");
                 if is_hidden_tag(tag) || is_hidden_node(doc, child) {

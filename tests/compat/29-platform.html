@@ -1,0 +1,135 @@
+<!doctype html><html><head><title>29 Plataforma</title><style>
+#p { color: #0a7d3f; font-size: 18px; margin-top: 4px; }
+#box { position: relative; opacity: 0.5; }
+</style></head><body>
+<p id="p">estilo</p>
+<div id="box">caixa</div>
+<div id="host"><span class="a">um</span><span class="b">dois</span></div>
+<div id="empty"></div>
+<script>
+const log = (key, value) => console.log(key + "=" + value);
+
+// The parser is still running: `readyState` must say so.
+log("rs", document.readyState);
+
+// --- getComputedStyle: reads the cascade the renderer used.
+const p = document.getElementById("p");
+const cs = getComputedStyle(p);
+log("cs.color", cs.color);
+log("cs.size", cs.getPropertyValue("font-size"));
+log("cs.margin", cs.marginTop);
+log("cs.camel", cs.backgroundColor);
+log("cs.unknown", JSON.stringify(cs.bogus));
+log("cs.cssText", JSON.stringify(cs.cssText));
+
+// --- matchMedia: evaluated against the layout viewport (1000x700).
+log("mq.min", matchMedia("(min-width: 500px)").matches);
+log("mq.big", matchMedia("(min-width: 5000px)").matches);
+log("mq.and", matchMedia("screen and (max-width: 2000px)").matches);
+log("mq.media", matchMedia("(min-width: 500px)").media);
+
+// --- URL and URLSearchParams.
+const u = new URL("../x?y=1#h", "https://example.com/a/b/");
+log("url.href", u.href);
+log("url.path", u.pathname);
+log("url.search", u.search);
+log("url.hash", u.hash);
+log("url.origin", u.origin);
+log("url.relative", URL.canParse("/sem-base"));
+const q = new URLSearchParams("a=1&b=2");
+q.append("c", "3");
+q.set("a", "9");
+log("usp", q.toString() + "," + q.get("a") + "," + q.has("b") + "," + q.size);
+
+// --- TextEncoder / TextDecoder: "ção" is five UTF-8 bytes.
+const enc = new TextEncoder().encode("ção");
+log("te.len", enc.length);
+log("te.round", new TextDecoder().decode(enc));
+
+// --- base64.
+log("b64", btoa("naro") + "," + atob("bmFybw=="));
+
+// --- structuredClone is a deep copy.
+const orig = { a: { b: 2 }, list: [1, 2] };
+const copy = structuredClone(orig);
+copy.a.b = 3;
+log("clone", orig.a.b + "," + copy.a.b + "," + copy.list.length);
+
+// --- DocumentFragment: appending moves its children and empties it.
+const frag = document.createDocumentFragment();
+const bold = document.createElement("b");
+bold.textContent = "A";
+const ital = document.createElement("i");
+ital.textContent = "B";
+frag.appendChild(bold);
+frag.appendChild(ital);
+log("frag.count", frag.childNodes.length + "," + frag.nodeType);
+const empty = document.getElementById("empty");
+empty.appendChild(frag);
+log("frag.after", empty.childNodes.length + "," + frag.childNodes.length + "," + empty.textContent);
+
+// --- element traversal.
+const host = document.getElementById("host");
+log("tr.first", host.firstElementChild.textContent);
+log("tr.last", host.lastElementChild.textContent);
+log("tr.count", host.childElementCount);
+log("tr.next", host.firstElementChild.nextElementSibling.textContent);
+log("tr.prev", host.lastElementChild.previousElementSibling.textContent);
+log("tr.byclass", document.getElementsByClassName("b").length);
+log("tr.bytag", host.getElementsByTagName("SPAN").length);
+
+// --- cloneNode.
+const deep = host.cloneNode(true);
+log("clone.deep", deep.childNodes.length + "," + deep.getAttribute("id"));
+log("clone.shallow", host.cloneNode(false).childNodes.length);
+
+// --- replaceChild, outerHTML, insertAdjacentText.
+const holder = document.createElement("div");
+holder.innerHTML = "<em id='old'>velho</em>";
+const old = holder.firstElementChild;
+const fresh = document.createElement("u");
+fresh.textContent = "novo";
+holder.replaceChild(fresh, old);
+log("replace", holder.innerHTML + "," + (old.parentNode === null));
+log("outer.get", fresh.outerHTML);
+fresh.outerHTML = "<s>trocado</s>";
+log("outer.set", holder.textContent);
+holder.insertAdjacentText("beforeend", "-fim");
+log("adjacent", holder.textContent);
+document.body.appendChild(holder);
+
+// --- event classes.
+let seen = "";
+const box = document.getElementById("box");
+box.addEventListener("click", (ev) => {
+  seen = ev.type + "," + (ev instanceof MouseEvent) + "," + (ev instanceof Event) + "," + ev.clientX;
+  ev.preventDefault();
+});
+const me = new MouseEvent("click", { clientX: 7, bubbles: true, cancelable: true });
+box.dispatchEvent(me);
+log("ev.mouse", seen + "," + me.defaultPrevented);
+
+let detail = "";
+box.addEventListener("custom", (ev) => { detail = ev.detail + "," + (ev instanceof CustomEvent); });
+box.dispatchEvent(new CustomEvent("custom", { detail: "d1" }));
+log("ev.custom", detail);
+
+let key = "";
+box.addEventListener("keydown", (ev) => { key = ev.key + "," + ev.ctrlKey + "," + (ev instanceof KeyboardEvent); });
+box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true }));
+log("ev.key", key);
+
+// --- history: the address bar changes immediately, the engine catches up.
+history.pushState({ page: 2 }, "", "?page=2");
+log("hist.state", JSON.stringify(history.state));
+log("hist.search", location.search);
+let popped = "no";
+window.addEventListener("popstate", () => { popped = "yes"; });
+history.back();
+
+setTimeout(() => {
+  log("hist.pop", popped);
+  log("rs.later", document.readyState);
+}, 0);
+</script>
+</body></html>
