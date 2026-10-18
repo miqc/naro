@@ -1,0 +1,10 @@
+[package]
+name = "naro-js"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rquickjs = { version = "0.9", default-features = false, features = [] }
+naro-html.workspace = true
+naro-css.workspace = true

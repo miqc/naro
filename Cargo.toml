@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/naro-html",
+    "crates/naro-css",
+    "crates/naro-text",
+    "crates/naro-layout",
+    "crates/naro-paint",
+    "crates/naro-net",
+    "crates/naro-image",
+    "crates/naro-js",
+    "crates/naro-engine",
+    "crates/naro-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+naro-html = { path = "crates/naro-html" }
+naro-css = { path = "crates/naro-css" }
+naro-text = { path = "crates/naro-text" }
+naro-layout = { path = "crates/naro-layout" }
+naro-paint = { path = "crates/naro-paint" }
+naro-net = { path = "crates/naro-net" }
+naro-image = { path = "crates/naro-image" }
+naro-js = { path = "crates/naro-js" }
+naro-engine = { path = "crates/naro-engine" }
+winit = "0.30.12"
+softbuffer = "0.4.8"
+ureq = { version = "2.12.1", default-features = false, features = ["native-tls", "gzip"] }
+ab_glyph = "0.2.29"
+url = "2.5.7"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

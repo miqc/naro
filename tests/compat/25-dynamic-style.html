@@ -1,0 +1,86 @@
+<!doctype html><html><head><title>25 Estilo dinamico</title>
+<style id="base">#old { color: #0e7490 }</style>
+<style id="dinamica">#styled { color: #334155 }</style>
+<style>
+body { margin: 0; font-size: 16px }
+p { margin: 4px 0 }
+#target { color: #1a1a1a }
+#target.ativo { color: #0a7d3f }
+#target2 { color: #1a1a1a }
+#target2.ativo { color: #0a7d3f }
+[data-state=on] { color: #681da8 }
+#inline { color: #333333 }
+#added { color: #1a1a1a }
+#box { width: 60px; height: 8px; background-color: #1558d6 }
+</style></head><body>
+<p id="target">alvo</p>
+<p id="target2">segundo alvo</p>
+<p id="box" data-state="off">caixa</p>
+<p id="inline" style="color: #333333">inline</p>
+<p id="added">novo estilo</p>
+<p id="old">estilo removido</p>
+<p id="styled">estilo trocado</p>
+<p id="gone">elemento removido</p>
+<button id="go">aplicar</button>
+<button id="cor">so cor</button>
+<script>
+var obs = [];
+var obsChild = 0;
+var observer = new MutationObserver(function (records) {
+  for (var i = 0; i < records.length; i++) {
+    var r = records[i];
+    if (r.type === 'attributes') obs.push('attributes:' + r.attributeName);
+    else obsChild += r.addedNodes.length;
+  }
+});
+observer.observe(document.getElementById('box'), { attributes: true });
+observer.observe(document.body, { childList: true, subtree: true });
+
+document.getElementById('go').addEventListener('click', function () {
+  // 1 and 2: add a class, then remove it from another element.
+  var t = document.getElementById('target');
+  t.classList.add('ativo');
+  t.classList.remove('ativo');
+  document.getElementById('target2').classList.add('ativo');
+
+  // 3: an attribute used by a selector.
+  document.getElementById('box').setAttribute('data-state', 'on');
+
+  // 4: inline style.
+  document.getElementById('inline').style.color = '#8a1f1f';
+
+  // 5: insert a new stylesheet.
+  var sheet = document.createElement('style');
+  sheet.textContent = '#added { color: #b45309 }';
+  document.body.appendChild(sheet);
+
+  // 6: rewrite an existing stylesheet.
+  document.getElementById('dinamica').textContent = '#styled { color: #0f766e }';
+
+  // 7: remove the stylesheet that coloured #old.
+  var base = document.getElementById('base');
+  base.parentNode.removeChild(base);
+
+  // 8: insert and remove elements.
+  var extra = document.createElement('p');
+  extra.textContent = 'elemento novo';
+  document.body.appendChild(extra);
+  document.body.removeChild(document.getElementById('gone'));
+
+  // The observer callback is a microtask, so it has already run by the time
+  // this timer fires; logging keeps the DOM untouched for the grouping check.
+  setTimeout(function () {
+    console.log('obs=' + obs.join(',') + ' added=' + obsChild);
+  }, 0);
+});
+
+// 9: many mutations in one task, none of them geometric.
+document.getElementById('cor').addEventListener('click', function () {
+  document.getElementById('target').style.color = '#b45309';
+  document.getElementById('inline').style.color = '#1558d6';
+  document.getElementById('target2').style.color = '#681da8';
+  // camelCase property: painted as a background, never a text run.
+  document.getElementById('box').style.backgroundColor = '#0e7490';
+});
+</script>
+</body></html>

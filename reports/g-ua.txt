@@ -1,0 +1,865 @@
+TITLE: Google
+URL: https://www.google.com/
+STATUS: Idle
+SYNC: restyle=0 relayout=0 repaint=0
+CSS: rules=1276 invalid=0 pseudo-element=92 unsupported-not=4 at-rule=37 interactive=201 unsupported-pseudo=27
+JS ERROR: <script> #1: cannot read property 'load' of undefined @     at <anonymous> (<input>:1:226)
+JS ERROR: <script> #3: not a function @     at <anonymous> (<input>:9:1862)
+JS ERROR: https://www.google.com/xjs/_/js/k=xjs.hd.pt_BR.yZwjkTKB1DM.2023.O/am=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAQCAAAAEAAAAAAAAAAAAAAAAAEAAIAAAAAAAAAAAAAAAAAAAAABAQJAAkAAAAAAAAAAAgAAAAAAQAAAAAAMAAAQAAgAAoAAMBAAAAAAAAAAAAAAAAAAAAACCAQAACAAAAAAAD-AQYYAQAAAAAAAAAAAAARAAAAAAAAAAAWAAAAQCAAAAAAAgABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAACgAAAACAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAAAAAAAAAAIAAAAKAAAgAAAgAAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAAAAIgAAAAAAAAAAAAAAEAAADoAAg8wJCCAgAAAAAAAAAAAAAAAAAAAAAAAAAAAEAABbALqSAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAg9BQAAAAAAAFgM/d=1/ed=1/dg=4/rs=ACT90oEGVHDBtWeoRyJpLFPvOrYsWuL79A/ee=ALeJib:B8gLwd;AfeaP:TkrAjf;BMxAGc:E5bFse;BgS6mb:fidj5d;BjwMce:cXX2Wb;BuJtU:v6yjN;CIZTGb:Kqhykb;CxXAWb:YyRLvc;DQEued:Fevhcf;DULqB:RKfG5c;Dkk6ge:JZmW9e;DpcR3d:zL72xf;EABSZ:MXZt9d;ESrPQc:mNTJvc;EVNhjf:pw70Gc;EjXHpb:pSHqh;EmZ2Bf:zr1jrb;EnlcNd:WeHg4;F54IAe:ZgsFh;F9mqte:UoRcbe;FSxmUe:fiZR8b;Fkukfc:i8H2c;Fmv9Nc:O1Tzwc;G0KhTb:LIaoZ;GleZL:J1A7Od;HMDDWe:G8QUdb;HtPxrd:Gx8jAb;IBADCc:RYquRb;IoGlCf:b5lhvb;IsdWVc:qzxzOb;JXJSm:ii1RGf;JXS8fb:Qj0suc;JqSq7d:y9ePhe;JsbNhc:Xd8iUd;K08hxe:zmbGlf;K5nYTd:ZDZcre;KA3P2:C3JnCe;KDb6nb:fE9n2;KOxcK:OZqGte;KQzWid:ZMKkN;KdIHef:BWtNj;KpRAue:Tia57b;LBgRLc:SdcwHb,XVMNvd;LBn8Cf:bJ9L0c;LEikZe:byfTOb,lsjVmc;LXA8b:q7OdKd;LsNahb:ucGLNb;MNkAde:KMCd1d;NJ1rfe:qTnoBf;NPKaK:SdcwHb;NSEoX:lazG7b;NjIwef:YVgi7d;Np8Qkd:Dpx6qc;Nyt6ic:jn2sGd;OIfWUb:qfOYcd;OgagBe:cNTe0;OiqE2c:TFpEK;OoK5v:Sp69O;OohIYe:mpEAQb;Pjplud:PoEs9b;PpTLXd:pJYjx;Q1Ow7b:x5CSu;Q7iJ9c:bVLZ3d;QE20Be:gIltO;QFOGlf:PQ2Aoe;QGR0gd:Mlhmy;QYLF2b:pAQYUd;Qk7yid:BbYS0d;Qw8Feb:jpavUe;R4IIIb:QWfeKf;R9Ulx:CR7Ufe;RCF5Sd:X1kBmd;RZKicf:PQXVv;Raf5me:mgvFMc;SFghJd:YRZpK;SLtqO:Kh1xYe;SMDL4c:fTfGO;SNUn3:ZwDk9d,xD8Kp;SNk4Je:wWMhg;ScI3Yc:e7Hzgb,e7Hzgb;ShpF6e:N0pvGc;Snahre:mGCtob;SzQQ3e:dNhofb;TIUVQd:lWTJwd;TroZ1d:vVVzjb;U96pRd:FsR04;UBKJZ:LGDJGb;UDrY1c:N0F29d,W50NVd,eps46d,wciyUe;UVmjEd:EesRsb;UVzb9c:IvPZ6d;UYRIEb:HzTAQc;UyG7Kb:wQd0G;V2HTTe:RolTY;VGRfx:VFqbr;VMuEm:pL7sBc;VN6jIc:ddQyuf;VOcgDe:YquhTb;VhA7bd:vAmQFf;VsAqSb:PGf2Re;W9QSQe:ynCWwc;WDGyFe:jcVOxd;WXtNeb:QU9BMd;Wfmdue:g3MJlb;Wl55ib:vgbiKb;Y3c5sd:FGbfLe;YIZmRd:A1yn5d;YV5bee:IvPZ6d;YnHUBf:sNsSob;ZSH6tc:QAvyLe;ZWEUA:afR4Cf;ZlOOMb:P0I0Ec;a56pNe:JEfCwb;aAJE9c:WHW6Ef;aCJ9tf:qKftvc;aVZq3e:EMeVIb;aZ61od:arTwJ;aci7y:Z5Tr6c;bUIkwb:WMwEHe;bcPXSc:gSZLJb;cEt90b:ws9Tlc;cFTWae:gT8qnd;dIoSBb:ZgGg9b;dLlj2:Qqt3Gf;dXdZV:a7QTqd;dowIGb:ebZ3mb,ebZ3mb;dtl0hd:lLQWFe;eBAeSb:Ck63tb;eBZ5Nd:audvde;eHDfl:ofjVkb;eJKchc:ATg1be;eO3lse:UefOmb;euOXY:OZjbQ;g8nkx:U4MzKc;gaub4:TN6bMe;gbfHR:qZtzib;gtVSi:ekUOYd;h3MYod:ws9Tlc;hK67qb:QWEO5b;hVic1b:Kqhykb;heHB1:sFczq;hjRo6e:F62sG;hlqGX:FWz1ic;hsLsYc:Vl118;hwoVHd:zw4U8c;iFQyKf:QIhFr;jJj2G:kF2o2b;k1O0rf:pnOULd;k2Qxcb:XY51pe;kbAm9d:MkHyGd;lOO0Vd:OTA3Ae;lbfkyf:MqGdUd;liAz7d:kF2o2b;mMVOGb:qDM7K;mWzs9c:fz5ukf;mtKMCc:ZG5Tfe;nBZnZe:CvErjb;nE6OJf:Fi4rsc;nEBWNb:MxKX9d;nJw4Gd:dPFZH;nrDcw:SuEoDe;oGtAuc:sOXFj;oSUNyd:fTfGO,fTfGO;oUlnpc:RagDlc;oiBhre:OuMkRd;okUaUd:wItadb;pKJiXd:VCenhc;pNsl2d:j9Yuyc;pXdRYb:JKoKVe;pj82le:ww04Df;qGV2uc:HHi04c;qQEoOc:KUM7Z,d7YSfd;qZx2Fc:j0xrE;qaS3gd:yiLg6e;qafBPd:sgY6Zb;qavrXe:I0C9u;qddgKe:d7YSfd,x4FYXe;rdexKf:FEkKD;rmWaj:PMS6Sd;ropkZ:hjoqoe;sTsDMc:JksfDf;sZmdvc:rdGEfc;tH4IIe:Ymry6;teSRSb:BMLai;tosKvd:ZCqP3;trZL0b:qY8PFe;uJfyCe:WJ5gBc;uuQkY:u2V3ud;vEYCNb:FaqsVd;vRlMvf:Iw9Xo;vfVwPd:lcrkwe;w3bZCb:ZPGaIb;w9w86d:XwhUEb,dt4g2b,gKD90c,lWVZVe;wFpbG:JbGbBc;wQlYve:aLUfP;wR5FRb:O1Gjze,TtcOte;wV5Pjc:L8KGxe;wxAT5b:tHKmqf;x9N9ie:KH4Qof;xBbsrc:NEW1Qc;xpaRob:AVqZ9b;yiL5Ab:MT0ZBd;ysNiMc:CpIBjd;yxTchf:KUM7Z;z97YGf:oug9te;zaIgPb:Sl0pxd/m=cdos,hsm,jsa,mb4ZUb,cEt90b,SNUn3,qddgKe,sTsDMc,dtl0hd,eHDfl,YV5bee,d,csi?cb=121509378: Unexpected end of input @     at <input>:949:528
+JS ERROR: <script> #6: cannot read property 'append' of undefined @     at C (<input>:4:1466)
+JS ERROR: <script> #9: XMLHttpRequest is not defined @     at pa (<input>:14:165)
+JS ERROR: https://www.gstatic.com/og/_/js/k=og.asy.en_US.RQWeQL4C_as.2019.O/rt=j/m=_ac,_awd,ada,lldp,qads,abld/exm=/d=1/ed=1/rs=AA2YrTuGbsx8J9y5y-8vfZToQEl93Ak1HQ: not a function @     at <anonymous> (<input>:174:28)
+JS ERROR: <script> #13: not a function @     at <anonymous> (<input>:1:631)
+JS ERROR: <script> #14: not a function @     at <anonymous> (<input>:1:18703)
+CONTENT_HEIGHT: 526.40
+DOM:
+<document>
+  html
+    head
+      meta
+      meta
+      link
+      meta
+      style
+        "@font-face{font-family:'Noto Color Emoji';font-style:normal;"
+      title
+        "Google"
+      script
+        "(function(){var w=["Google Sans",[400,500,700]];(function(){"
+      script
+        "window._hst=Date.now();"
+      script
+        "(function(){var _g={kEI:'A9DUaqfJJPyC5OUPvcqPsQ8',kEXPI:'31'"
+      link
+      script
+        "(function(){google.kEXPI='0,4413181,5799867,718,294,33,38,59"
+      script
+      "   "
+      script
+        "(function(){window.google.erd={jsr:1,bv:2562,sd:true,de:true"
+      "      "
+      link
+      "    "
+      style
+        "h1,ol,ul,li,button{margin:0;padding:0}button{border:none;bac"
+      " "
+      style
+        ":root{--COEmY:#1f1f1f;--xhUGwc:#fff}:root{--vZe0jb:#a3c9ff;-"
+      style
+        ".gb_2c{background:rgba(60,64,67,.9);border-radius:4px;color:"
+    body
+      div#ZnpjSd
+      div.plsC5e.RqyYHe
+        style
+          ".plsC5e{display:flex;flex-direction:column;height:100%}.acUs"
+        style
+          ".bNg8Rb{clip:rect(1px,1px,1px,1px);height:1px;overflow:hidde"
+        div#ZnpjSd
+        div.acUsEb.Qi40Vc.CoM3Df
+          style
+            ".CoM3Df{display:flex;align-items:center;padding:6px;}.AorTac"
+          div.AorTac
+            div
+              header#gb.gb_y.gb_Pd
+                div.gb_R.gb_aa.gb_3f.gb_ag
+                  div.gb_9.gb_aa
+                    a.gb_8
+                      "Gmail"
+                  div.gb_9.gb_aa
+                    a.gb_8
+                      "Imagens"
+                div#gbwa.gb_L.gb_Hd.gb_aa
+                  div.gb_D
+                    a.gb_C
+                      svg.gb_H
+                        path
+                        image
+                div.gb_z
+                  a.gb_A
+                    span.gb_4
+                      "Fazer login"
+        div.k5vh8d
+        div
+          div.X1pLC
+            "              "
+            header.RHL8Vb
+              style
+                ".RHL8Vb{height:88px}.RHL8Vb[data-elvt]{}.RHL8Vb[data-cobsp]{"
+              style
+                ".VHYc8b{position:fixed;z-index:928;pointer-events:auto;trans"
+              div.VHYc8b.iZUKEe
+                style
+                  ".iZUKEe svg,.iZUKEe div{forced-color-adjust:none;-webkit-for"
+                style
+                  ".iZUKEe{top:37px;left:18.5px}"
+                a
+                  svg
+                    clippath#_A9DUaqfJJPyC5OUPvcqPsQ8_1
+                      path
+                    filter#_A9DUaqfJJPyC5OUPvcqPsQ8_2
+                      fegaussianblur
+                    g
+                      foreignobject
+                        div
+                      rect
+            div#j6sJ2c.yp
+        div#sI1XGe.acUsEb.lGdWHf.L2xtTc.sI1XGe
+          style
+            ".sI1XGe{display:flex;flex-direction:column;align-items:cente"
+          div.naW5gc.uZekje
+            style
+              ".uZekje{max-height:92px;position:relative}.ESTs9d{max-height"
+            svg.ESTs9d
+              path
+              path
+              path
+              path
+              path
+              path
+          div.naW5gc.mL3MVc.DYz2A
+            style
+              ".DYz2A{display:flex;flex-direction:column;justify-content:fl"
+            span.HeJfy
+              "No que você está pensando?"
+        div.acUsEb.Q6KTif.KEY6ib
+          style
+            ".KEY6ib{padding:20px}.KEY6ib{padding:20px 96px}"
+          dialog#H8C8bb.H8C8bb
+            div#spch.spch
+          form
+            " "
+            div
+              " "
+              div.A8SBwf
+                style
+                  ".A8SBwf{--client-adapter-margin-base:150px}.A8SBwf{position:"
+                div.RNNXgb
+                  div.doljm
+                    div.Fqft4
+                      div#_A9DUaqfJJPyC5OUPvcqPsQ8_3.XNfAUb
+                        style
+                          ".XNfAUb{display:block;position:relative}.RyIFgf{display:bloc"
+                        div.RyIFgf.rAdPSe
+                          div.EDblX.HG5ZQb
+                            div.Egmwab
+                        style
+                          ".pQXcHc{cursor:default;opacity:0;visibility:hidden}.EQOGhe{u"
+                        div.EQOGhe
+                          div.pQXcHc.WVNiId.xab99e.x7gBsf.tT7KPd.JTjhXd.btku5b.OJeuxf
+                            div.niO4u.KnB5rb
+                              span.z1asCe
+                                svg
+                                  path
+                        div.EQOGhe
+                          div.f6oksb.xab99e.x7gBsf.tT7KPd.JTjhXd.btku5b.OJeuxf
+                            div.niO4u.KnB5rb
+                              span.z1asCe
+                                svg
+                                  path
+                        script
+                          "(function(){
+(this||self).Bqpk9e=function(f,d,n,e,k,p){var g"
+                  div.SDkEP
+                    div.UMOYhd
+                      div.A7sPV.tX61Ub
+                        div.y1yadf
+                          style
+                            ".y1yadf{position:relative;display:inline-block}"
+                          span
+                            button.UbbAWe
+                              span.wPSZBe
+                                svg
+                                  path
+                        div.oMByyf
+                          ul.FHRw9d
+                            li
+                              button.izN7If
+                                span.aY45Yd.z1asCe
+                                  svg
+                                    path
+                                span
+                                  "Adicionar imagens"
+                                span.bgM5Ee.z1asCe
+                                  svg
+                                    path
+                            li
+                              button.izN7If
+                                span.aY45Yd.z1asCe
+                                  svg
+                                    path
+                                span
+                                  "Adicionar arquivos"
+                                span.bgM5Ee.z1asCe
+                                  svg
+                                    path
+                            div.jJBQF
+                            li.gQ6DCe
+                              div.x3SAYd
+                                style
+                                  ".x3SAYd{position:relative}"
+                                span
+                                  button.izN7If
+                                    span.aY45Yd
+                                      span
+                                        "🍌"
+                                    span#_A9DUaqfJJPyC5OUPvcqPsQ8_7
+                                      "Criar imagens"
+                                    span.bgM5Ee.z1asCe
+                                      svg
+                                        path
+                              div.x3SAYd
+                                span
+                                  button.izN7If
+                                    span.aY45Yd.z1asCe
+                                      svg
+                                        path
+                                    span#_A9DUaqfJJPyC5OUPvcqPsQ8_8
+                                      "Canvas"
+                                    span.bgM5Ee.z1asCe
+                                      svg
+                                        path
+                          input
+                          input
+                    div.a4bIc
+                      style
+                        ".gLFyf,.svBvU{font:16px Google Sans,Arial,sans-serif,Noto Co"
+                      div.svBvU
+                      textarea#ti6dpd.gLFyf
+                    div.dRYYxd
+                      style
+                        ".dRYYxd{display:flex;flex:0 0 auto;align-items:stretch;flex-"
+                      div.ywK6Rd
+                        div.y1yadf
+                          span
+                            style
+                              ".DdBH5{flex:1 0 auto;display:flex;cursor:pointer;align-items"
+                            div.DdBH5
+                              span.VlXRkf
+                                img.UKU4Cf
+                                svg
+                                  path
+                        style
+                          ".fzj3ad{flex:1 0 auto;display:flex;cursor:pointer;align-item"
+                        div.y1yadf
+                          span
+                            div.fzj3ad
+                              svg.ByCvB
+                                path
+                        div.y1yadf
+                          span
+                            style
+                              ".etxtjc{flex:1 0 auto;display:flex;cursor:pointer;align-item"
+                            div.etxtjc
+                              svg.hWdRGb
+                                path
+                      button.plR5qb
+                        style
+                          ".plR5qb.PHjFye .CcxW7b{display:none}.plR5qb:focus-visible .b"
+                        div.CcxW7b.BznTFe
+                          div.fZhNMe
+                            div.WkMYIb
+                              div.eruMcc
+                                div.Tdahud
+                                  div.tgPjse
+                              div.eruMcc.eOuHwe
+                                div.Tdahud
+                                  div.tgPjse
+                        div.bvUkz
+                        div.u4Uk3c
+                          span.PD3zdc.L0nkUd.z1asCe
+                            svg
+                              path
+                          span.lTxWLe
+                            "Modo IA"
+                          span.PD3zdc.hMo0Tb.z1asCe
+                            svg
+                              path
+                  div.WwJHVc.MGe1Ac
+                    style
+                      ".MGe1Ac{display:flex;justify-content:space-between;position:"
+                    div.gshNb
+                      div.gth5fd
+                      button.DBqRk
+                        style
+                          ".DBqRk{display:flex;align-self:center;cursor:pointer;flex-sh"
+                        span.eL7oAc.aY45Yd
+                          span
+                            "🍌"
+                        span#sb-tool-label-4
+                          "Criar"
+                        span.RMHDZd.z1asCe
+                          svg
+                            path
+                        span#sb-accessible-label-4
+                          "Remover Criar Imagens"
+                      button.DBqRk
+                        span.eL7oAc.aY45Yd.z1asCe
+                          svg
+                            path
+                        span#sb-tool-label-2
+                          "Canvas"
+                        span.RMHDZd.z1asCe
+                          svg
+                            path
+                        span#sb-accessible-label-2
+                          "Remover Canvas"
+                    div.dRYYxd
+                  div.M8H8pb
+                div.BznTFe
+                  div.fZhNMe
+                    div.WkMYIb
+                      div.eruMcc
+                        div.Tdahud
+                          div.tgPjse
+                      div.eruMcc.eOuHwe
+                        div.Tdahud
+                          div.tgPjse
+                div.UUbT9.EyBRub
+                  style
+                    ".UUbT9{position:absolute;text-align:left;z-index:3;cursor:de"
+                  div
+                    div#_A9DUaqfJJPyC5OUPvcqPsQ8_9
+                      style
+                        ".z8gr9e{color:var(--bbQxAb)}"
+                      style
+                        ".i1eWpb .GTERze{display:none}.ky4hfd{display:none}.i1eWpb .k"
+                      div#_A9DUaqfJJPyC5OUPvcqPsQ8_11.yp
+                  div.RK9gM.ky4hfd
+                    div#_A9DUaqfJJPyC5OUPvcqPsQ8_13.pbgWk
+                  div.RjPuVb
+                  div.aajZCb
+                    div.xtSCL
+                    div#Alh6id.gDtRnb
+                      div.erkvQe
+                      div.e1R9Ud
+                    style
+                      "#shJ2Vb{display:none}.OBMEnb{padding:0;margin:0}.G43f7e{disp"
+                    div#shJ2Vb.OBMEnb
+                      ul.G43f7e
+                    style
+                      "#ynRric{display:none}.ynRric{list-style-type:none;flex-direc"
+                    div#ynRric.ynRric
+                    style
+                      ".sbct{display:flex;flex-direction:column;min-width:0;overflo"
+                    style
+                      ".x6vvNd{width:20px;height:20px;fill:#9aa0a6}"
+                    li#YMXe.sbct.PZPZlf
+                      div.eIPGRd
+                        div.sbic
+                          div.j0GJWd
+                            div
+                              img.uHGFVd.AZNDm
+                            div.iQxPRb
+                              img.uHGFVd.EOLKOc
+                              img.uHGFVd.EOLKOc
+                          svg.x6vvNd
+                        div.pcTkSc
+                          div.lnnVSe
+                            div.wM6W7d
+                              span
+                            div.ClJ9Yb
+                              div.zjKSsb
+                              span.dKU7sc
+                            div.a5RLac
+                              span
+                          style
+                            ".MagqMc .ZFiwCf{background-color:#fff;border:1px solid var(-"
+                          div.Sz7Lee.MagqMc.U48fD
+                            style
+                              ".U48fD{display:block;padding:16px;padding-top:0;margin-top:1"
+                            style
+                              ".ZFiwCf{display:flex;align-items:center;justify-content:cent"
+                            hr.Bi9oQd
+                            div.ZFiwCf
+                              span.LGwnxb.JGD2rd
+                                span
+                                  "Ver mais"
+                              span.w2fKdd.z1asCe
+                                svg
+                                  path
+                        div.AQZ9Vd
+                          style
+                            ".JCHpcb:hover,.LvqzR .JCHpcb{color:#1558d6;text-decoration:u"
+                          div.sbai
+                            "Excluir"
+                    style
+                      "#d6ItKb{display:none}.AB2Fdd{display:flex}"
+                    li#d6ItKb.AB2Fdd
+                      div.eIPGRd
+                        div.ZDHp
+                          div.kZtr1b
+                            style
+                              ".ZDHp{position:relative;margin:20px;display:flex}.DJbVFb,.o6"
+                            div.lnnVSe
+                              div.SHFPkb
+                              div.bTSf5c
+                              div.PnfqLc
+                              div.HrUlUc
+                          span.XAFD5c
+                          div.j0GJWd
+                            div
+                              img.uHGFVd.AZNDm
+                            div.iQxPRb
+                              img.uHGFVd.EOLKOc
+                              img.uHGFVd.EOLKOc
+                    style
+                      "#TN4rFf{display:none}.IDVnvc{display:inline-block;overflow:h"
+                    li#TN4rFf.IDVnvc.PZPZlf
+                      div.cRV9hb
+                        div.aVbWac
+                          div.sbic
+                        div.pcTkSc
+                          div.lnnVSe
+                            div.wM6W7d
+                              span
+                            div.ClJ9Yb
+                              span.dKU7sc
+                    div.eemHY.T14B5e.iThwld
+                      " "
+                      style
+                        ".T14B5e{height:70px}.T14B5e input[type="submit"],.gbqfba{bac"
+                      "  "
+                      center
+                        " "
+                        input.gNO89b
+                        "   "
+                        input.RNmpXc
+                        "   "
+                      " "
+                  div
+                    style
+                      ".WzNHm{font-size:11px;line-height:12px;overflow:hidden;botto"
+                    div.WzNHm.mWcf0e
+                      div.VfL2Y.LRZwuc
+                        "Denunciar previsões inadequadas"
+                div.FPdoLc.T14B5e.iThwld
+                  "   "
+                  center
+                    " "
+                    input.gNO89b
+                    "   "
+                    input.RNmpXc
+                    "   "
+                  " "
+                div#_A9DUaqfJJPyC5OUPvcqPsQ8_15
+                div#_A9DUaqfJJPyC5OUPvcqPsQ8_17.A1IcJ
+              "  "
+              script
+                "(function(){
+var a=this||self;var c=document.querySelector(""
+              "   "
+            " "
+            div#tophf
+              input
+              input
+              input
+              input
+              input
+        div.acUsEb.gwogMd
+          style
+            ".I5vV9{text-align:center}"
+          div
+            div#_A9DUaqfJJPyC5OUPvcqPsQ8_19.yp
+            "   "
+            script
+              "(function(){function d(a,b){if(a.wfpe&&document.prerendering"
+            "    "
+          div
+            div#_A9DUaqfJJPyC5OUPvcqPsQ8_20.yp
+        div
+          style
+            ".xmqeGe{opacity:0.06;pointer-events:none}"
+        div.acUsEb
+          div.Ij8KCd
+            style
+              ".Ij8KCd{background:var(--xhUGwc);opacity:1;transition:opacit"
+            div.O3yKUb
+              "Brasil"
+            div.g55egf.xQQEXb
+              div.g55egf.osh6F
+                a.eQtdDf
+                  "Sobre"
+                a.eQtdDf
+                  "Publicidade"
+                a.eQtdDf
+                  "Negócios"
+                a.eQtdDf
+                  " Como funciona a Pesquisa "
+              div.g55egf.rWLVme
+                a.eQtdDf
+                  "Privacidade"
+                a.eQtdDf
+                  "Termos"
+                span
+                  style
+                    ".JQmN7b:hover{text-decoration:underline}"
+                  span
+                    style
+                      ".EfFKwc{background-color:var(--xhUGwc)}.EfFKwc g-menu-item{d"
+                    g-popup
+                      div.CcNe6e
+                        div.JQmN7b.eQtdDf
+                          "Configurações"
+                      div.UjBGL.pkWBse.iRQHZe
+                        g-menu.EfFKwc.yTik0.PBn44e.iQXTJe.wplJBd
+                          g-menu-item.EpPYLd.GZnQqe
+                            div.YpcDnf.OSrXXb.HG1dvd
+                              a
+                                "Configurações de Pesquisa"
+                          g-menu-item.EpPYLd.GZnQqe
+                            div.YpcDnf.OSrXXb.HG1dvd
+                              a
+                                "Pesquisa avançada"
+                          g-menu-item.EpPYLd.GZnQqe
+                            div.YpcDnf.OSrXXb.HG1dvd
+                              a
+                                "Seus dados na Pesquisa"
+                          g-menu-item.EpPYLd.GZnQqe
+                            div.YpcDnf.OSrXXb.HG1dvd
+                              a
+                                "Histórico de pesquisa"
+                          g-menu-item.EpPYLd.GZnQqe
+                            div.YpcDnf.OSrXXb.HG1dvd
+                              a
+                                "Ajuda da pesquisa"
+                          g-menu-item.EpPYLd.GZnQqe
+                            div.YpcDnf.OSrXXb.HG1dvd
+                              span
+                                "Enviar feedback"
+                          g-menu-item.EpPYLd.GZnQqe.LGiluc
+                          g-menu-item.EpPYLd.GZnQqe
+                            div.YpcDnf.OSrXXb.HG1dvd
+                              div#YUIDDb.y0fQ9c
+                                style
+                                  ".tFYjZe{align-items:center;display:flex;justify-content:spac"
+                                div.tFYjZe
+                                  "Tema escuro: desativado"
+                                  div.iOHNLb
+                                    span.z1asCe
+                                      svg
+                                        path
+            div
+      div.LSCOAf
+        style
+          ".LSCOAf{height:0;overflow:hidden}"
+        div#lb.Qe0THe.OLKT8d
+          style
+            ".Qe0THe{z-index:1101;position:absolute;top:-1000px}"
+        span
+          span
+        script
+          ";this.gbar_={CONFIG:[[[0,"www.gstatic.com","og.asy.en_US.RQW"
+        div
+          div.gb_Q
+            "Google Apps"
+          script
+          link
+          script
+            "const linkEl = document.getElementById('ogb_ss');linkEl.onlo"
+        div
+      textarea.csi
+      script
+        "(function(){var pd=-1;var pi=0;(function(){function h(){func"
+      div
+      div
+      div
+      script
+        "(function(){var pmc='{\x22abd\x22:{\x22abd\x22:false,\x22deb"
+  style
+    ".WVNiId.btku5b,.f6oksb.btku5b{color:var(--amnPwe);display:fl"
+BLOCKS:
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  a rect=(799.7,18.0,24.8,24.0) bg=#000000 border=0
+  div rect=(784.7,18.0,39.8,24.0) bg=#000000 border=0
+  a rect=(799.7,42.0,36.5,24.0) bg=#000000 border=0
+  div rect=(784.7,42.0,51.5,24.0) bg=#000000 border=0
+  div rect=(784.7,6.0,62.5,60.0) bg=#000000 border=0
+  a rect=(851.3,10.0,40.0,56.0) bg=#000000 border=0
+  div rect=(847.3,6.0,64.0,56.0) bg=#000000 border=0
+  div rect=(847.3,6.0,64.0,60.0) bg=#000000 border=0
+  a rect=(915.3,10.0,85.0,40.0) bg=#0b57d0 border=0
+  div rect=(911.3,6.0,82.7,56.0) bg=#000000 border=0
+  header rect=(6.0,6.0,988.0,60.0) bg=#000000 border=0
+  div rect=(6.0,6.0,988.0,60.0) bg=#000000 border=0
+  div rect=(6.0,6.0,988.0,60.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,72.0) bg=#000000 border=0
+  div rect=(0.0,72.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,72.0,1000.0,0.0) bg=#000000 border=0
+  header rect=(0.0,0.0,64.0,88.0) bg=#000000 border=0
+  div rect=(18.5,37.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(18.5,37.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,88.0,64.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,64.0,700.0) bg=#000000 border=0
+  div rect=(18.5,37.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(18.5,37.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(96.0,72.0,808.0,0.0) bg=#000000 border=0
+  span rect=(96.0,72.0,808.0,40.0) bg=#000000 border=0
+  div rect=(96.0,72.0,808.0,64.0) bg=#000000 border=0
+  div rect=(0.0,72.0,1000.0,64.0) bg=#000000 border=0
+  span rect=(157.0,163.0,0.0,24.0) bg=#000000 border=0
+  button rect=(157.0,163.0,0.0,24.0) bg=#eef0f4 border=0
+  div rect=(157.0,163.0,0.0,24.0) bg=#000000 border=0
+  div rect=(157.0,163.0,0.0,24.0) bg=#000000 border=0
+  div rect=(157.0,169.0,0.0,24.0) bg=#000000 border=0
+  textarea rect=(157.0,169.0,613.5,14.0) bg=#000000 border=0
+  div rect=(157.0,163.0,613.5,36.0) bg=#000000 border=0
+  svg rect=(778.5,163.0,0.0,0.0) bg=#000000 border=0
+  span rect=(778.5,163.0,27.0,0.0) bg=#000000 border=0
+  div rect=(770.5,163.0,43.0,0.0) bg=#000000 border=0
+  div rect=(770.5,163.0,43.0,24.0) bg=#000000 border=0
+  svg rect=(821.5,163.0,0.0,24.0) bg=#000000 border=0
+  div rect=(813.5,163.0,16.0,24.0) bg=#000000 border=0
+  div rect=(813.5,163.0,16.0,24.0) bg=#000000 border=0
+  svg rect=(837.5,163.0,0.0,24.0) bg=#000000 border=0
+  div rect=(829.5,163.0,16.0,24.0) bg=#000000 border=0
+  div rect=(829.5,163.0,16.0,24.0) bg=#000000 border=0
+  div rect=(770.5,169.0,43.0,24.0) bg=#000000 border=0
+  span rect=(821.5,169.0,48.5,37.8) bg=#000000 border=0
+  div rect=(821.5,169.0,48.5,37.8) bg=#000000 border=0
+  button rect=(813.5,169.0,64.5,36.0) bg=#eef0f4 border=0
+  div rect=(821.5,169.0,48.5,0.0) bg=#000000 border=0
+  div rect=(821.5,169.0,48.5,0.0) bg=#000000 border=0
+  div rect=(821.5,169.0,48.5,0.0) bg=#000000 border=0
+  div rect=(821.5,169.0,48.5,0.0) bg=#000000 border=0
+  div rect=(821.5,169.0,48.5,0.0) bg=#000000 border=0
+  div rect=(821.5,169.0,48.5,0.0) bg=#000000 border=0
+  div rect=(821.5,169.0,48.5,0.0) bg=#000000 border=0
+  div rect=(821.5,169.0,48.5,0.0) bg=#000000 border=0
+  div rect=(821.5,169.0,48.5,0.0) bg=#000000 border=0
+  div rect=(821.5,169.0,48.5,0.0) bg=#000000 border=0
+  svg rect=(821.5,169.0,20.0,0.0) bg=#000000 border=0
+  span rect=(821.5,169.0,20.0,0.0) bg=#000000 border=0
+  svg rect=(821.5,169.0,20.0,0.0) bg=#000000 border=0
+  span rect=(821.5,163.0,20.0,0.0) bg=#000000 border=0
+  div rect=(770.5,163.0,64.5,36.0) bg=#000000 border=0
+  div rect=(157.0,163.0,686.0,36.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,50.0) bg=#000000 border=1
+  input rect=(424.0,230.0,152.0,38.0) bg=#f8f9fa border=1
+  input rect=(322.9,230.0,152.0,38.0) bg=#f8f9fa border=1
+  center rect=(156.0,230.0,688.0,38.0) bg=#000000 border=0
+  div rect=(156.0,212.0,688.0,88.0) bg=#000000 border=0
+  div rect=(156.0,300.0,688.0,0.0) bg=#000000 border=0
+  div rect=(156.0,300.0,688.0,0.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,138.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,14.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,0.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,0.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,0.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,0.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,0.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,0.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,0.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,0.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,0.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,0.0) bg=#000000 border=0
+  svg rect=(156.0,162.0,20.0,0.0) bg=#000000 border=0
+  span rect=(156.0,162.0,20.0,0.0) bg=#000000 border=0
+  svg rect=(156.0,162.0,20.0,0.0) bg=#000000 border=0
+  span rect=(156.0,162.0,20.0,0.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,0.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,0.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,0.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,0.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,0.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,0.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,0.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,0.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,0.0) bg=#000000 border=0
+  div rect=(156.0,162.0,688.0,0.0) bg=#000000 border=0
+  div rect=(96.0,156.0,808.0,144.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,14.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  svg rect=(0.0,0.0,20.0,0.0) bg=#000000 border=0
+  span rect=(0.0,0.0,20.0,0.0) bg=#000000 border=0
+  svg rect=(0.0,0.0,20.0,0.0) bg=#000000 border=0
+  span rect=(0.0,0.0,20.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(96.0,300.0,808.0,0.0) bg=#000000 border=0
+  form rect=(96.0,156.0,808.0,144.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,14.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  svg rect=(0.0,0.0,20.0,0.0) bg=#000000 border=0
+  span rect=(0.0,0.0,20.0,0.0) bg=#000000 border=0
+  svg rect=(0.0,0.0,20.0,0.0) bg=#000000 border=0
+  span rect=(0.0,0.0,20.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,136.0,1000.0,184.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,14.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  svg rect=(0.0,0.0,20.0,0.0) bg=#000000 border=0
+  span rect=(0.0,0.0,20.0,0.0) bg=#000000 border=0
+  svg rect=(0.0,0.0,20.0,0.0) bg=#000000 border=0
+  span rect=(0.0,0.0,20.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,320.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,320.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,320.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,320.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,320.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,320.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,320.0,1000.0,30.0) bg=#000000 border=0
+  a rect=(195.3,350.0,61.0,51.6) bg=#000000 border=0
+  a rect=(266.7,350.0,91.5,51.6) bg=#000000 border=0
+  a rect=(236.7,401.6,80.0,73.2) bg=#000000 border=0
+  a rect=(190.2,474.8,173.2,51.6) bg=#000000 border=0
+  div rect=(190.2,350.0,173.2,176.4) bg=#000000 border=0
+  a rect=(711.4,350.0,90.8,51.6) bg=#000000 border=0
+  a rect=(722.1,401.6,69.3,73.2) bg=#000000 border=0
+  div rect=(703.7,474.8,106.2,51.6) bg=#000000 border=0
+  div rect=(703.7,474.8,106.2,51.6) bg=#000000 border=0
+  span rect=(703.7,474.8,106.2,51.6) bg=#000000 border=0
+  div rect=(703.7,350.0,106.2,176.4) bg=#000000 border=0
+  div rect=(0.0,350.0,1000.0,176.4) bg=#000000 border=0
+  div rect=(0.0,320.0,1000.0,206.4) bg=#000000 border=0
+  div rect=(0.0,320.0,1000.0,206.4) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,526.4) bg=#000000 border=0
+  div rect=(0.0,526.4,1000.0,0.0) bg=#000000 border=0
+      clip=(0,526,1000,0)
+  div rect=(0.0,526.4,1000.0,0.0) bg=#000000 border=0
+      clip=(0,526,1000,0)
+  div rect=(0.0,526.4,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,-1000.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,526.4,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,526.4,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,526.4,1000.0,0.0) bg=#000000 border=0
+  body rect=(0.0,0.0,1000.0,526.4) bg=#ffffff border=0
+  header rect=(0.0,0.0,64.0,88.0) bg=#000000 border=0
+  div rect=(18.5,37.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(18.5,37.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,88.0,64.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,64.0,700.0) bg=#000000 border=0
+  div rect=(18.5,37.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(18.5,37.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,14.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  svg rect=(0.0,0.0,20.0,0.0) bg=#000000 border=0
+  span rect=(0.0,0.0,20.0,0.0) bg=#000000 border=0
+  svg rect=(0.0,0.0,20.0,0.0) bg=#000000 border=0
+  span rect=(0.0,0.0,20.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,-1000.0,1000.0,0.0) bg=#000000 border=0
+  html rect=(0.0,0.0,1000.0,526.4) bg=#000000 border=0
+  header rect=(0.0,0.0,64.0,88.0) bg=#000000 border=0
+  div rect=(18.5,37.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(18.5,37.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,88.0,64.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,64.0,700.0) bg=#000000 border=0
+  div rect=(18.5,37.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(18.5,37.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,14.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  svg rect=(0.0,0.0,20.0,0.0) bg=#000000 border=0
+  span rect=(0.0,0.0,20.0,0.0) bg=#000000 border=0
+  svg rect=(0.0,0.0,20.0,0.0) bg=#000000 border=0
+  span rect=(0.0,0.0,20.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,0.0) bg=#000000 border=0
+  div rect=(0.0,-1000.0,1000.0,0.0) bg=#000000 border=0
+TEXT:
+  (799.7,28.5) "Gmail" size=13.0 color=#1f1f1f link=https://mail.google.com/mail/&amp;ogbl
+  (799.7,52.5) "Imagens" size=13.0 color=#1f1f1f link=https://www.google.com/imghp?hl=pt-BR&amp;ogbl
+  (932.4,31.4) "Fazer login" size=14.0 color=#ffffff link=https://accounts.google.com/ServiceLogin?hl=pt-BR&amp;passive=true&amp;continue=https://www.google.com/&amp;ec=futura_exp_og_so_72776762_e
+  (346.6,98.0) "No que você está pensando?" size=32.0 color=#1a1a1a link=-
+  (825.5,174.4) "Modo" size=14.0 color=#1a1a1a link=-
+  (825.5,193.3) "IA" size=14.0 color=#1a1a1a link=-
+  (461.5,242.4) "Pesquisa Google" size=14.0 color=#3c4043 link=-
+  (361.5,242.4) "Estou com sorte" size=14.0 color=#3c4043 link=-
+  (210.3,378.0) "Sobre" size=16.0 color=#1a56db link=https://about.google/?utm_source=google-BR&amp;utm_medium=referral&amp;utm_campaign=hp-footer&amp;fg=1
+  (281.7,378.0) "Publicidade" size=16.0 color=#1a56db link=https://www.google.com/intl/pt-BR_br/ads/?subid=ww-ww-et-g-awa-a-g_hpafoot1_1!o2&amp;utm_source=google.com&amp;utm_medium=referral&amp;utm_campaign=google_hpafooter&amp;fg=1
+  (251.7,429.6) "Negócio" size=16.0 color=#1a56db link=https://www.google.com/services/?subid=ww-ww-et-g-awa-a-g_hpbfoot1_1!o2&amp;utm_source=google.com&amp;utm_medium=referral&amp;utm_campaign=google_hpbfooter&amp;fg=1
+  (251.7,451.2) "s" size=16.0 color=#1a56db link=https://www.google.com/services/?subid=ww-ww-et-g-awa-a-g_hpbfoot1_1!o2&amp;utm_source=google.com&amp;utm_medium=referral&amp;utm_campaign=google_hpbfooter&amp;fg=1
+  (205.2,502.8) "Como funciona a Pesquisa" size=16.0 color=#1a56db link=https://google.com/search/howsearchworks/?fg=1
+  (726.4,378.0) "Privacidade" size=16.0 color=#1a56db link=https://policies.google.com/privacy?hl=pt-BR&amp;fg=1
+  (737.1,429.6) "Termo" size=16.0 color=#1a56db link=https://policies.google.com/terms?hl=pt-BR&amp;fg=1
+  (737.1,451.2) "s" size=16.0 color=#1a56db link=https://policies.google.com/terms?hl=pt-BR&amp;fg=1
+  (718.7,502.8) "Configurações" size=16.0 color=#1a1a1a link=-

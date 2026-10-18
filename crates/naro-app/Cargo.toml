@@ -1,0 +1,19 @@
+[package]
+name = "naro-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "naro"
+path = "src/main.rs"
+
+[dependencies]
+naro-engine.workspace = true
+naro-net.workspace = true
+naro-paint.workspace = true
+naro-layout.workspace = true
+naro-css.workspace = true
+winit.workspace = true
+softbuffer.workspace = true
+url.workspace = true

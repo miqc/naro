@@ -1,0 +1,11 @@
+[package]
+name = "naro-layout"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+naro-html.workspace = true
+naro-css.workspace = true
+naro-text.workspace = true
+naro-image.workspace = true

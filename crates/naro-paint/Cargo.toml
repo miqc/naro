@@ -1,0 +1,11 @@
+[package]
+name = "naro-paint"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+naro-css.workspace = true
+naro-text.workspace = true
+naro-layout.workspace = true
+naro-image.workspace = true

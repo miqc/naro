@@ -1,0 +1,32 @@
+<!doctype html><html><head><title>28 Shadow DOM</title><style>
+body { margin: 0; font-size: 16px }
+/* This rule is the page's own: it must not reach inside the component. */
+.inside { color: #8a1f1f }
+</style></head><body>
+<x-card id="card"></x-card>
+<p class="inside">fora do componente</p>
+<script>
+class XCard extends HTMLElement {
+  connectedCallback() {
+    const root = this.attachShadow({ mode: "open" });
+    // The component's own sheet: `:host` styles the element itself, and the
+    // `.inside` rule here must not leak out to the page.
+    root.innerHTML =
+      "<style>:host{display:block;background-color:#681da8}" +
+      ".inside{color:#0a7d3f} p{margin:0}</style>" +
+      "<p class='inside'>dentro do componente</p>";
+    console.log("pronto=" + (this.shadowRoot !== null) + "," + (root.host === this));
+  }
+}
+customElements.define("x-card", XCard);
+
+// The same path taken after load: the engine has to pick up a shadow tree
+// created by a timer, with its own sheet, on the next flush.
+setTimeout(function () {
+  var late = document.createElement("div");
+  document.body.appendChild(late);
+  var root = late.attachShadow({ mode: "open" });
+  root.innerHTML = "<style>p{margin:0;color:#b45309}</style><p>tarde</p>";
+}, 0);
+</script>
+</body></html>

@@ -1,0 +1,25 @@
+<!doctype html><html><head><title>21 Media + Observer</title><style>
+body{margin:0;font-size:16px}
+#alvo{color:#1a1a1a}
+@media screen and (min-width: 600px) { #alvo { color: #0a7d3f } }
+@media (max-width: 400px) { #alvo { color: #8a1f1f } }
+@media print { #alvo { color: #0000ff } }
+</style></head><body>
+<p id="alvo">texto alvo</p>
+<p id="log">sem mutacoes</p>
+<script>
+var log = document.getElementById('log');
+var alvo = document.getElementById('alvo');
+var seen = [];
+var obs = new MutationObserver(function (records) {
+  for (var i = 0; i < records.length; i++) seen.push(records[i].type + ':' + (records[i].attributeName || records[i].addedNodes.length));
+  log.textContent = 'obs=' + seen.join(',');
+});
+obs.observe(alvo, { attributes: true, attributeFilter: ['data-x'] });
+alvo.setAttribute('data-x', '1');
+alvo.setAttribute('data-ignored', '2');
+queueMicrotask(function () {
+  log.textContent = log.textContent + ' take=' + obs.takeRecords().length;
+});
+</script>
+</body></html>

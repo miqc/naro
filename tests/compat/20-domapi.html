@@ -1,0 +1,21 @@
+<!doctype html><html><head><title>20 DOM API</title><style>
+body{margin:0;font-size:16px}
+.on{color:#0a7d3f;font-weight:700}
+#box{padding:8px}
+</style></head><body>
+<div id="box">alvo</div>
+<p id="out">vazio</p>
+<script>
+var box = document.getElementById('box');
+box.classList.add('on');
+var okAdd = box.classList.contains('on');
+box.classList.remove('on');
+var okRemove = !box.classList.contains('on');
+box.style.setProperty('background-color', '#eef0f4');
+var bg = box.style.getPropertyValue('background-color');
+var novo = document.createElement('span');
+novo.textContent = 'inserido';
+document.getElementById('out').insertBefore(novo, null);
+document.getElementById('out').textContent = 'cls:' + okAdd + ',' + okRemove + ' bg:' + bg + ' filho:' + document.getElementById('out').children.length;
+</script>
+</body></html>

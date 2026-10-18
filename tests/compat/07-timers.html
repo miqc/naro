@@ -1,0 +1,7 @@
+<!doctype html><html><head><title>07 Timers</title></head><body>
+<p id="out">inicial</p>
+<script>
+queueMicrotask(function () { document.getElementById('out').setAttribute('data-micro', '1'); });
+setTimeout(function () { document.getElementById('out').textContent = 'timer rodou'; }, 0);
+</script>
+</body></html>

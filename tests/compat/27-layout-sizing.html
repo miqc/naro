@@ -1,0 +1,16 @@
+<!doctype html><html><head><title>27 Dimensionamento de caixas</title><style>
+body { margin: 0; font-size: 16px }
+/* A flex container honours its own `width`. */
+.row { display: flex; align-items: center; width: 600px; height: 40px; background-color: #eeeeee }
+/* A flex item honours its own `width`, not the row's. */
+.icon { position: relative; display: inline-block }
+.icon > span { display: inline-block; width: 36px; height: 36px; position: relative }
+/* `svg { width: 100% }` fills the wrapper it sits in, not the page. */
+.icon svg { display: block; width: 100%; height: 100% }
+/* An inline element with a size gets a box to hold it. */
+.pill { display: inline; width: 60px; height: 20px; background-color: #1558d6 }
+.fill { flex: 1; height: 40px; background-color: #ccddee }
+</style></head><body>
+<div class="row" id="row"><div class="icon" id="icon"><span id="iconbox"><svg viewBox="0 0 24 24"><path d="M2 2h20v20H2z"/></svg></span></div><div class="fill" id="fill"></div></div>
+<p id="after"><span class="pill" id="pill">x</span> depois</p>
+</body></html>

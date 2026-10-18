@@ -1,0 +1,31 @@
+TITLE: Example Domain
+URL: https://example.com/
+STATUS: Idle
+CSS: rules=2 invalid=0 pseudo-element=0 unsupported-not=0 at-rule=0 interactive=0 unsupported-pseudo=0
+JS ERROR: https://example.com/s.js: not a function @     at <eval> (<input>:1:38)
+CONTENT_HEIGHT: 172.80
+DOM:
+<document>
+  html
+    head
+      meta
+      link
+      meta
+      title
+        "Example Domain"
+      style
+        "html{color-scheme:light dark;background:light-dark(#eee,#222"
+    body
+      p
+        "This domain is for use in documentation examples without nee"
+      script
+  "
+"
+BLOCKS:
+  p rect=(292.0,48.0,416.0,76.8) bg=#000000 border=0
+  body rect=(260.0,0.0,480.0,172.8) bg=#ffffff border=0
+  html rect=(0.0,0.0,1000.0,172.8) bg=#000000 border=0
+TEXT:
+  (321.8,61.0) "This domain is for use in documentation examples without needing" size=16.0 color=#1a1a1a link=-
+  (294.2,86.6) "permission. This is not a service; avoid relying on it for testing and monitoring" size=16.0 color=#1a1a1a link=-
+  (474.4,112.2) "purposes." size=16.0 color=#1a1a1a link=-

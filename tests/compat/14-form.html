@@ -1,0 +1,18 @@
+<!doctype html><html><head><title>14 Form</title><style>
+body{margin:0;font-size:16px} label{display:block;margin:8px}
+</style></head><body>
+<label>Nome</label><input id="nome" placeholder="digite">
+<label>Email</label><input id="email" value="a@b">
+<p id="eco">vazio</p>
+<button id="enviar">Enviar</button>
+<script>
+var nome = document.getElementById('nome');
+nome.addEventListener('input', function () {
+  document.getElementById('eco').textContent = 'valor:' + nome.value;
+});
+nome.addEventListener('focus', function () { document.getElementById('eco').setAttribute('data-focus', 'sim'); });
+document.getElementById('enviar').addEventListener('click', function () {
+  document.getElementById('eco').textContent = 'enviado:' + nome.value;
+});
+</script>
+</body></html>

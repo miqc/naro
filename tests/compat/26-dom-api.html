@@ -1,0 +1,74 @@
+<!doctype html><html><head><title>26 DOM API</title><style>
+body { margin: 0; font-size: 16px }
+p { margin: 4px 0 }
+#wrap { padding: 20px }
+#box { width: 200px; height: 40px; padding: 10px; border: 2px solid #1a1a1a; background-color: #eeeeee }
+#grow { width: 100px; height: 8px; background-color: #1558d6 }
+#box > p { color: #1a1a1a }
+#added { color: #1a1a1a }
+[data-state=on] { color: #681da8 }
+.on { color: #0a7d3f }
+</style></head><body>
+<div id="wrap"><div id="box"><p id="inner">dentro</p></div></div>
+<div id="grow"></div>
+<p id="sibling">irmao</p>
+<script>
+var out = [];
+var a = document.querySelector('#box');
+
+// 1: identity
+out.push('same=' + (a === document.querySelector('#box')));
+out.push('tree=' + (a === document.getElementById('wrap').children[0]));
+out.push('parent=' + a.parentElement.id);
+
+// 2: measurements
+var r = a.getBoundingClientRect();
+out.push('rect=' + [r.x, r.y, r.width, r.height].join(','));
+out.push('edges=' + (r.right === r.x + r.width && r.bottom === r.y + r.height));
+out.push('offset=' + [a.offsetWidth, a.offsetHeight].join(','));
+out.push('client=' + [a.clientWidth, a.clientHeight].join(','));
+
+// 3: dataset
+a.dataset.userId = '42';
+out.push('ds=' + a.dataset.userId);
+a.setAttribute('data-state', 'on');
+out.push('ds2=' + a.dataset.state);
+delete a.dataset.userId;
+out.push('ds3=' + (a.getAttribute('data-user-id') === null));
+
+// 4: matches / closest
+out.push('matches=' + a.matches('div#box') + ',' + a.matches('span'));
+out.push('closest=' + document.getElementById('inner').closest('div').id);
+
+// 5: insertAdjacentHTML, four positions
+a.insertAdjacentHTML('beforeend', '<span id="last">fim</span>');
+a.insertAdjacentHTML('afterbegin', '<b id="first">inicio</b>');
+a.insertAdjacentHTML('beforebegin', '<i id="before">antes</i>');
+a.insertAdjacentHTML('afterend', '<u id="after">depois</u>');
+out.push('adjacent=' + [document.getElementById('first').id,
+                        document.getElementById('last').id,
+                        document.getElementById('before').id,
+                        document.getElementById('after').id].join(','));
+
+// 6: createTextNode, append, remove
+var t = document.createTextNode('texto novo');
+a.appendChild(t);
+out.push('text=' + (t.nodeType === 3) + ',' + (a.lastChild === t));
+document.getElementById('sibling').remove();
+out.push('removed=' + (document.getElementById('sibling') === null));
+
+// 7: a reference survives the node being removed
+var box = a;
+box.remove();
+out.push('kept=' + (box.tagName === 'DIV') + ',' + (box.parentElement === null));
+
+// 8: geometry after a style change, measured from a later task
+var grow = document.getElementById('grow');
+var before = grow.getBoundingClientRect().width;
+grow.style.width = '150px';
+setTimeout(function () {
+  var r2 = grow.getBoundingClientRect();
+  console.log(out.join(' | ') + ' before=' + before + ' later=' + r2.width);
+}, 0);
+</script>
+</body></html>

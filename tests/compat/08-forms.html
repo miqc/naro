@@ -1,0 +1,10 @@
+<!doctype html><html><head><title>08 Formulários</title></head><body>
+<form><input id="campo" type="text" value="abc"><button type="submit">Enviar</button></form>
+<p id="eco"></p>
+<script>
+var campo = document.getElementById('campo');
+campo.addEventListener('input', function () { document.getElementById('eco').textContent = 'input:' + campo.value; });
+campo.value = 'novo';
+campo.dispatchEvent(new CustomEvent('input'));
+</script>
+</body></html>

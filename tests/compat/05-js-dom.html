@@ -1,0 +1,12 @@
+<!doctype html><html><head><title>05 JS DOM</title></head><body>
+<h1 id="t">antes</h1>
+<div id="host"></div>
+<script>
+document.getElementById('t').textContent = 'depois do script';
+var p = document.createElement('p');
+p.textContent = 'criado dinamicamente';
+p.className = 'dinamico';
+document.getElementById('host').appendChild(p);
+document.getElementById('host').setAttribute('data-ok', 'sim');
+</script>
+</body></html>

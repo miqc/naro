@@ -1,0 +1,16 @@
+<!doctype html><html><head><title>15 Grid</title><style>
+body{margin:0;font-size:16px}
+.g{display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px; padding:12px; background-color:#f2f4f7}
+.cell{background-color:#1a56db; color:#fff; padding:8px}
+.wide{grid-column:span 2; background-color:#0a7d3f}
+.tall{grid-row:span 2; background-color:#8a1f1f}
+</style></head><body>
+<div class="g">
+<p class="cell wide">Ocupa duas colunas</p>
+<p class="cell">curto</p>
+<p class="cell tall">Ocupa duas linhas com um texto mais comprido</p>
+<p class="cell">outro</p>
+<p class="cell">mais um item de texto</p>
+<p class="cell">fim</p>
+</div>
+</body></html>

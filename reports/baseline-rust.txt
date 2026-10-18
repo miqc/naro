@@ -1,0 +1,1268 @@
+TITLE: Rust Programming Language
+URL: https://rust-lang.org/
+STATUS: Idle
+CONTENT_HEIGHT: 3233.16
+DOM:
+<document>
+  "
+"
+  html
+    "
+  "
+    head
+      "
+    "
+      meta
+      "
+    "
+      title
+        "
+            Rust Programming Language
+        "
+      "
+    "
+      meta
+      "
+    "
+      meta
+      "
+
+    "
+      "
+    "
+      meta
+      "
+    "
+      meta
+      "
+    "
+      meta
+      "
+    "
+      meta
+      "
+    "
+      meta
+      "
+    "
+      meta
+      "
+
+    "
+      "
+    "
+      meta
+      "
+    "
+      meta
+      "
+    "
+      meta
+      "
+    "
+      meta
+      "
+    "
+      meta
+      "
+
+    "
+      "
+    "
+      link
+      "
+    "
+      link
+      "
+    "
+      link
+      "
+    "
+      link
+      "
+
+    "
+      "
+    "
+      link
+      "
+    "
+      link
+      "
+    "
+      link
+      "
+    "
+      link
+      "
+    "
+      link
+      "
+    "
+      link
+      "
+    "
+      meta
+      "
+    "
+      meta
+      "
+    "
+      meta
+      "
+
+        "
+      "
+"
+      link
+      "
+"
+      link
+      "
+"
+      link
+      "
+"
+      link
+      "
+"
+      link
+      "
+"
+      link
+      "
+"
+      link
+      "
+"
+      link
+      "
+"
+      link
+      "
+"
+      link
+      "
+"
+      link
+      "
+
+    "
+      script
+        "
+      window.RUST_BASE_URL = "";
+    "
+      "
+
+    "
+      "
+    "
+      script
+      "
+    "
+      script
+      "
+  "
+      style
+        "/*!
+  Theme: a11y-dark
+  Author: @ericwbailey
+  Maintainer: "
+      style
+        "html{line-height:1.15;-webkit-text-size-adjust:100%}body{mar"
+      style
+        "/* Alfa Slab One Regular - latin */
+@font-face {
+  font-fami"
+      style
+        "@charset "UTF-8";
+@media screen and (max-width: 30em) {
+  .f"
+    "
+  "
+    body
+      "
+    "
+      nav.flex.flex-row.justify-center.justify-end-l.items-center.flex-wrap.ph2.pl3-ns.pr3-ns.pb3
+        "
+      "
+        div.brand.flex-auto.w-100.w-auto-l.self-start.tc.tl-l
+          "
+        "
+          a.brand
+            "
+          "
+            img.v-mid.ml0-l
+            "
+        "
+          "
+      "
+        "
+    
+      "
+        ul.nav.list.w-100.w-auto-l.flex.flex-none.flex-row.flex-wrap.justify-center.justify-end-l.items-center.pv2.ph0.ph4-ns
+          "
+        "
+          li.tc.pv2.ph2.ph4-ns.flex-20-s
+            a
+              "Install"
+          "
+        "
+          li.tc.pv2.ph2.ph4-ns.flex-20-s
+            a
+              "Learn"
+          "
+        "
+          li.tc.pv2.ph2.ph4-ns.flex-20-s
+            a
+              "Playground"
+          "
+        "
+          li.tc.pv2.ph2.ph4-ns.flex-20-s
+            a
+              "Tools"
+          "
+        "
+          li.tc.pv2.ph2.ph4-ns.flex-20-s
+            a
+              "Governance"
+          "
+        "
+          li.tc.pv2.ph2.ph4-ns.flex-20-s
+            a
+              "Funding"
+          "
+        "
+          li.tc.pv2.ph2.ph4-ns.flex-20-s
+            a
+              "Community"
+          "
+        "
+          li.tc.pv2.ph2.ph4-ns.flex-20-s
+            a
+              "Blog"
+          "
+      "
+        "
+    
+      "
+        div.w-100.w-auto-l.flex-none.flex.justify-center.pv4.pv-0-l.languages
+          "
+        "
+          div.select
+            "
+          "
+            label.hidden
+              "Language"
+            "
+          "
+            select#language-nav
+              "
+            "
+              option
+                "English (en-US)"
+              "
+            "
+              option
+                "Español (es)"
+              "
+            "
+              option
+                "Français (fr)"
+              "
+            "
+              option
+                "Italiano (it)"
+              "
+            "
+              option
+                "日本語 (ja)"
+              "
+            "
+              option
+                "Português (pt-BR)"
+              "
+            "
+              option
+                "Русский (ru)"
+              "
+            "
+              option
+                "Türkçe (tr)"
+              "
+            "
+              option
+                "简体中文 (zh-CN)"
+              "
+            "
+              option
+                "正體中文 (zh-TW)"
+              "
+          "
+            "
+        "
+          "
+      "
+        "
+    
+    "
+      "
+    "
+      main
+        header.mt3.mb6.w-100.mw-none.ph3.mw8-m.mw9-l.center
+          "
+  "
+          div.flex.flex-column.flex-row-l
+            "
+    "
+            div.w-70-l.mw8-l
+              "
+      "
+              h1
+                "Rust"
+              "
+      "
+              h2.mt4.mb0.f2.f1-ns
+                "
+        A language empowering everyone "
+                br.dn.db-ns
+                " to build reliable and efficient software.
+      "
+              "
+    "
+            "
+    "
+            div.w-30-l.flex-column.pl0-l.pr0-l.pl3.pr3
+              "
+      "
+              a.button.button-download.ph4.mt0.w-100
+                "
+        Get Started
+      "
+              "
+      "
+              p.tc.f3.f2-l.mt3
+                "
+        "
+                a.download-link
+                  "Version 1.99.1"
+                "
+      "
+              "
+    "
+            "
+  "
+          "
+"
+        "
+
+"
+        section#language-values.green
+          "
+  "
+          div.w-100.mw-none.ph3.mw8-m.mw9-l.center.f3
+            "
+    "
+            header.pb0
+              "
+      "
+              h2
+                "
+        Why Rust?
+      "
+              "
+      "
+              div.highlight
+              "
+    "
+            "
+    "
+            div.flex-none.flex-l
+              "
+      "
+              section.w-100.pv2.pv0-l.mt4
+                "
+        "
+                h3.f2.f1-l
+                  "Performance"
+                "
+        "
+                p.f3.lh-copy
+                  "
+          Rust is blazingly fast and memory-efficient: with"
+                "
+      "
+              "
+      "
+              section.w-100.pv2.pv0-l.mt4.mh5-l
+                "
+        "
+                h3.f2.f1-l
+                  "Reliability"
+                "
+        "
+                p.f3.lh-copy
+                  "
+          Rust’s rich type system and ownership model guara"
+                "
+      "
+              "
+      "
+              section.w-100.pv2.pv0-l.mt4
+                "
+        "
+                h3.f2.f1-l
+                  "Productivity"
+                "
+        "
+                p.f3.lh-copy
+                  "
+          Rust has great documentation, a friendly compiler"
+                "
+      "
+              "
+
+    "
+            "
+  "
+          "
+"
+        "
+"
+        section.purple
+          "
+  "
+          div.w-100.mw-none.ph3.mw8-m.mw9-l.center.f3
+            "
+    "
+            header
+              "
+      "
+              h2
+                "
+        Build it in Rust
+      "
+              "
+      "
+              div.highlight
+              "
+    "
+            "
+
+    "
+            div.flex-none.flex-l.flex-row
+              "
+      "
+              p.flex-grow-1.pb2
+                "
+        In 2018, the Rust community decided to improve the "
+                a
+                  "the 2018
+roadmap"
+                "). For these, you can find many high-quality crates and some"
+              "
+    "
+            "
+
+    "
+            div.flex-none.flex-l.flex-row
+              "
+      "
+              div.flex.flex-row.flex-column-l.justify-between-l.mw8.measure-wide-l.w-100.mt5.mt2-l
+                "
+        "
+                div.v-top.tc-l
+                  "
+          "
+                  img.mw3.mw4-ns
+                  "
+        "
+                "
+        "
+                div.v-top.pl4.pl0-l.pt0.pt3-l.measure-wide-l.flex-l.flex-column-l.flex-auto-l.justify-between-l
+                  "
+          "
+                  h3.tc-l
+                    "
+            Command Line
+          "
+                  "
+          "
+                  p.flex-grow-1
+                    "
+            Whip up a CLI tool quickly with Rust’s robust e"
+                  "
+          "
+                  a.button.button-secondary
+                    "Building Tools"
+                  "
+        "
+                "
+      "
+              "
+
+      "
+              div.flex.flex-row.flex-column-l.justify-between-l.mw8.measure-wide-l.w-100.mt5.mt2-l.pl4-l
+                "
+        "
+                div.v-top.tc-l
+                  "
+          "
+                  img.mw3.mw4-ns
+                  "
+        "
+                "
+        "
+                div.v-top.pl4.pl0-l.pt0.pt3-l.measure-wide-l.flex-l.flex-column-l.flex-auto-l.justify-between-l
+                  "
+          "
+                  h3.tc-l
+                    "
+            WebAssembly
+          "
+                  "
+          "
+                  p.flex-grow-1
+                    "
+          Use Rust to supercharge your JavaScript, one modu"
+                  "
+          "
+                  a.button.button-secondary
+                    "Writing Web Apps"
+                  "
+        "
+                "
+      "
+              "
+
+      "
+              div.flex.flex-row.flex-column-l.justify-between-l.mw8.measure-wide-l.w-100.mt5.mt2-l.pl4-l
+                "
+        "
+                div.v-top.tc-l
+                  "
+          "
+                  img.mw3.mw4-ns
+                  "
+        "
+                "
+        "
+                div.v-top.pl4.pl0-l.pt0.pt3-l.measure-wide-l.flex-l.flex-column-l.flex-auto-l.justify-between-l
+                  "
+          "
+                  h3.tc-l
+                    "
+            Networking
+          "
+                  "
+          "
+                  p.flex-grow-1
+                    "
+            Predictable performance. Tiny resource footprin"
+                  "
+          "
+                  a.button.button-secondary
+                    "Working On Servers"
+                  "
+        "
+                "
+      "
+              "
+
+      "
+              div.flex.flex-row.flex-column-l.justify-between-l.mw8.measure-wide-l.w-100.mt5.mt2-l.pl4-l
+                "
+        "
+                div.v-top.tc-l
+                  "
+          "
+                  img.mw3.mw4-ns
+                  "
+        "
+                "
+        "
+                div.v-top.pl4.pl0-l.pt0.pt3-l.measure-wide-l.flex-l.flex-column-l.flex-auto-l.justify-between-l
+                  "
+          "
+                  h3.tc-l
+                    "
+            Embedded
+          "
+                  "
+          "
+                  p.flex-grow-1
+                    "
+            Targeting low-resource devices?
+Need low-level "
+                  "
+          "
+                  a.button.button-secondary
+                    "Starting With Embedded"
+                  "
+        "
+                "
+      "
+              "
+    "
+            "
+  "
+          "
+"
+        "
+"
+        section.white.production
+          "
+  "
+          div.w-100.mw-none.ph3.mw8-m.mw9-l.center
+            "
+    "
+            header
+              "
+      "
+              h2
+                "Rust in production"
+              "
+      "
+              div.highlight
+              "
+    "
+            "
+    "
+            div.description
+              "
+      "
+              p.lh-copy.f2
+                "
+        Hundreds of companies around the world are using Ru"
+                strong
+                  "From startups to large
+corporations, from embedded devices t"
+                "
+      "
+              "
+    "
+            "
+  "
+          "
+"
+        "
+"
+        section.get-involved.red
+          "
+  "
+          div.w-100.mw-none.ph3.mw8-m.mw9-l.center.f3
+            "
+    "
+            header
+              "
+      "
+              h2
+                "Get involved"
+              "
+      "
+              div.highlight
+              "
+    "
+            "
+    "
+            div.flex.flex-column.flex-row-l
+              "
+      "
+              div#read-rust.mw-50-l.mr4-l.pt0.flex.flex-column.justify-between-l
+                "
+        "
+                h3
+                  "Read Rust"
+                "
+        "
+                p.flex-grow-1
+                  "We love documentation! Take a look at the books available on"
+                "
+        "
+                a.button.button-secondary
+                  "Read the book"
+                "
+      "
+              "
+      "
+              div#watch-rust.mw-50-l.pt3.pt0-l.flex.flex-column.justify-between-l
+                "
+        "
+                h3
+                  "Watch Rust"
+                "
+        "
+                p.flex-grow-1
+                  "The Rust community has a dedicated YouTube channel collectin"
+                "
+        "
+                a.button.button-secondary
+                  "Watch the Videos"
+                "
+      "
+              "
+    "
+            "
+    "
+            div.pt3
+              "
+      "
+              h3
+                "Contribute code"
+              "
+      "
+              p
+                "
+      Rust is truly a community effort, and we welcome cont"
+              "
+      "
+              a.button.button-secondary
+                "
+        Read Contribution Guide
+      "
+              "
+    "
+            "
+  "
+          "
+"
+        "
+"
+        section.white.thanks
+          "
+  "
+          div.w-100.mw-none.ph3.mw8-m.mw9-l.center
+            "
+    "
+            header
+              "
+      "
+              h2
+                "Thanks"
+              "
+      "
+              div.highlight
+              "
+    "
+            "
+    "
+            div.description
+              "
+      "
+              p.lh-copy.f2
+                "
+        Rust would not exist without the generous contribut"
+              "
+    "
+            "
+    "
+            div.flex.flex-column.flex-row-l
+              "
+      "
+              div#individual-code.mw-50-l.mr4-l.pt0.flex.flex-column.justify-between-l
+                "
+        "
+                h3
+                  "Individuals"
+                "
+        "
+                p.flex-grow-1
+                  "Rust is a community project and is very thankful for the man"
+                "
+        "
+                a.button.button-secondary
+                  "See individual contributors"
+                "
+      "
+              "
+      "
+              div#company-sponsorships.mw-50-l.pt3.pt0-l.flex.flex-column.justify-between-l
+                "
+        "
+                h3
+                  "Corporate sponsors"
+                "
+        "
+                p.flex-grow-1
+                  "The Rust project receives support from companies through the"
+                "
+        "
+                a.button.button-secondary
+                  "See Foundation members"
+                "
+      "
+              "
+    "
+            "
+  "
+          "
+"
+        "
+
+    "
+      "
+    "
+      footer
+        "
+      "
+        div.w-100.mw-none.ph3.mw8-m.mw9-l.center.f3
+          "
+        "
+          div.flex.flex-column.flex-row-l.pv0-l
+            "
+          "
+            div#get-help.flex.flex-column.mw8.w-100.measure-wide-l.pv2.pv5-m.pv2-ns.ph4-m.ph4-l
+              "
+            "
+              h4
+                "Get help!"
+              "
+            "
+              ul
+                "
+              "
+                li
+                  a
+                    "Documentation"
+                "
+              "
+                li
+                  a
+                    "Rust Forge (Contributor Documentation)"
+                "
+              "
+                li
+                  a
+                    "Ask a Question on the Users Forum"
+                "
+            "
+              "
+            "
+              div.languages
+                "
+              "
+                div.select
+                  "
+                "
+                  label.hidden
+                    "Language"
+                  "
+                "
+                  select#language-footer
+                    "
+                  "
+                    option
+                      "English (en-US)"
+                    "
+                  "
+                    option
+                      "Español (es)"
+                    "
+                  "
+                    option
+                      "Français (fr)"
+                    "
+                  "
+                    option
+                      "Italiano (it)"
+                    "
+                  "
+                    option
+                      "日本語 (ja)"
+                    "
+                  "
+                    option
+                      "Português (pt-BR)"
+                    "
+                  "
+                    option
+                      "Русский (ru)"
+                    "
+                  "
+                    option
+                      "Türkçe (tr)"
+                    "
+                  "
+                    option
+                      "简体中文 (zh-CN)"
+                    "
+                  "
+                    option
+                      "正體中文 (zh-TW)"
+                    "
+                "
+                  "
+              "
+                "
+            "
+              "
+          "
+            "
+          "
+            div.flex.flex-column.mw8.w-100.measure-wide-l.pv2.pv5-m.pv2-ns.ph4-m.ph4-l
+              "
+            "
+              h4
+                "Terms and policies"
+              "
+            "
+              ul
+                "
+              "
+                li
+                  a
+                    "Code of Conduct"
+                "
+              "
+                li
+                  a
+                    "Licenses"
+                "
+              "
+                li
+                  a
+                    "Logo Policy and Media Guide"
+                "
+              "
+                li
+                  a
+                    "Security Disclosures"
+                "
+              "
+                li
+                  a
+                    "Privacy Notice"
+                  "
+              "
+                "
+              "
+                li
+                  a
+                    "All Policies"
+                "
+            "
+              "
+          "
+            "
+          "
+            div.flex.flex-column.mw8.w-100.measure-wide-l.pv2.pv5-m.pv2-ns.ph4-m.ph4-l
+              "
+            "
+              h4
+                "Social"
+              "
+            "
+              div.flex.flex-row.flex-wrap.items-center
+                "
+              "
+                a
+                  img
+                "
+              "
+                a
+                  img
+                "
+              "
+                a
+                  img.pv2
+                "
+              "
+                a
+                  img
+                "
+            "
+              "
+          "
+            "
+    
+        "
+          "
+        "
+          div.attribution
+            "
+          "
+            p
+              "
+            Maintained by the Rust Team. See a bug?
+"
+              a
+                "File an issue!"
+              "
+          "
+            "
+          "
+            p
+              "Web site built every day at 22:00 UTC"
+            "
+        "
+          "
+      "
+        "
+    "
+      "
+    "
+      script
+      "
+  "
+    "
+"
+  "
+"
+BLOCKS:
+  div rect=(786.9,3.0,150.0,150.0) bg=#000000 border=0
+  li rect=(939.8,20.0,31.1,25.6) bg=#000000 border=0
+  li rect=(970.9,20.0,29.1,25.6) bg=#000000 border=0
+  li rect=(936.9,49.6,60.6,25.6) bg=#000000 border=0
+  li rect=(997.5,49.6,28.4,25.6) bg=#000000 border=0
+  li rect=(936.9,79.2,63.1,25.6) bg=#000000 border=0
+  li rect=(1000.0,79.2,43.4,25.6) bg=#000000 border=0
+  li rect=(936.9,108.8,61.6,25.6) bg=#000000 border=0
+  li rect=(998.5,108.8,23.9,25.6) bg=#000000 border=0
+  ul rect=(936.9,16.0,63.1,148.0) bg=#000000 border=0
+  div rect=(147.8,162.0,0.0,25.6) bg=#000000 border=0
+  div rect=(147.8,164.0,852.2,25.6) bg=#000000 border=0
+  nav rect=(0.0,0.0,1000.0,328.0) bg=#000000 border=0
+  h1 rect=(0.0,328.0,217.0,38.4) bg=#000000 border=0
+  h2 rect=(0.0,385.4,217.0,120.0) bg=#000000 border=0
+  div rect=(0.0,328.0,217.0,177.4) bg=#000000 border=0
+  p rect=(310.0,404.8,25.2,102.4) bg=#000000 border=0
+  div rect=(310.0,328.0,25.2,195.2) bg=#000000 border=0
+  div rect=(0.0,328.0,1000.0,195.2) bg=#000000 border=0
+  header rect=(0.0,328.0,1000.0,195.2) bg=#000000 border=0
+  h2 rect=(0.0,563.2,1000.0,30.0) bg=#000000 border=0
+  div rect=(-10.0,593.2,1000.0,12.0) bg=#2e2459 border=0
+  header rect=(0.0,553.2,1000.0,52.0) bg=#000000 border=0
+  h3 rect=(0.0,605.2,320.1,31.2) bg=#000000 border=0
+  p rect=(0.0,672.4,320.1,96.0) bg=#000000 border=0
+  section rect=(0.0,605.2,320.1,193.2) bg=#000000 border=0
+  h3 rect=(320.1,605.2,261.8,31.2) bg=#000000 border=0
+  p rect=(320.1,672.4,261.8,96.0) bg=#000000 border=0
+  section rect=(320.1,605.2,261.8,193.2) bg=#000000 border=0
+  h3 rect=(581.9,605.2,418.1,31.2) bg=#000000 border=0
+  p rect=(581.9,672.4,418.1,96.0) bg=#000000 border=0
+  section rect=(581.9,605.2,418.1,193.2) bg=#000000 border=0
+  div rect=(0.0,605.2,1000.0,193.2) bg=#000000 border=0
+  div rect=(0.0,553.2,1000.0,245.2) bg=#000000 border=0
+  section rect=(0.0,523.2,1000.0,335.2) bg=#0b7261 border=0
+  h2 rect=(0.0,898.4,1000.0,30.0) bg=#000000 border=0
+  div rect=(-10.0,928.4,1000.0,12.0) bg=#a72145 border=0
+  header rect=(0.0,888.4,1000.0,82.0) bg=#000000 border=0
+  p rect=(0.0,970.4,1000.0,51.2) bg=#000000 border=0
+  div rect=(0.0,970.4,1000.0,81.2) bg=#000000 border=0
+  div rect=(0.0,1051.6,273.4,150.0) bg=#000000 border=0
+  h3 rect=(0.0,1201.6,273.4,31.2) bg=#000000 border=0
+  p rect=(0.0,1250.8,273.4,76.8) bg=#000000 border=0
+  a rect=(0.0,1357.6,273.4,38.5) bg=#a72145 border=1
+  div rect=(0.0,1201.6,273.4,194.5) bg=#000000 border=0
+  div rect=(0.0,1051.6,273.4,344.5) bg=#000000 border=0
+  div rect=(273.4,1051.6,264.0,150.0) bg=#000000 border=0
+  h3 rect=(273.4,1201.6,264.0,31.2) bg=#000000 border=0
+  p rect=(273.4,1250.8,264.0,76.8) bg=#000000 border=0
+  a rect=(273.4,1357.6,264.0,38.5) bg=#a72145 border=1
+  div rect=(273.4,1201.6,264.0,194.5) bg=#000000 border=0
+  div rect=(273.4,1051.6,264.0,344.5) bg=#000000 border=0
+  div rect=(537.4,1051.6,213.5,150.0) bg=#000000 border=0
+  h3 rect=(537.4,1201.6,213.5,31.2) bg=#000000 border=0
+  p rect=(537.4,1250.8,213.5,76.8) bg=#000000 border=0
+  a rect=(537.4,1357.6,213.5,38.5) bg=#a72145 border=1
+  div rect=(537.4,1201.6,213.5,194.5) bg=#000000 border=0
+  div rect=(537.4,1051.6,213.5,344.5) bg=#000000 border=0
+  div rect=(750.9,1051.6,249.1,150.0) bg=#000000 border=0
+  h3 rect=(750.9,1201.6,249.1,31.2) bg=#000000 border=0
+  p rect=(750.9,1250.8,249.1,76.8) bg=#000000 border=0
+  a rect=(750.9,1357.6,249.1,38.5) bg=#a72145 border=1
+  div rect=(750.9,1201.6,249.1,194.5) bg=#000000 border=0
+  div rect=(750.9,1051.6,249.1,344.5) bg=#000000 border=0
+  div rect=(0.0,1051.6,1000.0,344.5) bg=#000000 border=0
+  div rect=(0.0,888.4,1000.0,507.7) bg=#000000 border=0
+  section rect=(0.0,858.4,1000.0,597.7) bg=#2e2459 border=0
+  h2 rect=(0.0,1496.1,1000.0,30.0) bg=#000000 border=0
+  div rect=(-10.0,1526.1,1000.0,12.0) bg=#ffc832 border=0
+  header rect=(0.0,1486.1,1000.0,82.0) bg=#000000 border=0
+  p rect=(0.0,1568.1,1000.0,48.0) bg=#000000 border=0
+  div rect=(0.0,1568.1,1000.0,78.0) bg=#000000 border=0
+  div rect=(0.0,1486.1,1000.0,160.0) bg=#000000 border=0
+  section rect=(0.0,1456.1,1000.0,250.0) bg=#000000 border=0
+  h2 rect=(0.0,1746.1,1000.0,30.0) bg=#000000 border=0
+  div rect=(-10.0,1776.1,1000.0,12.0) bg=#2e2459 border=0
+  header rect=(0.0,1736.1,1000.0,82.0) bg=#000000 border=0
+  h3 rect=(0.0,1818.1,498.2,31.2) bg=#000000 border=0
+  p rect=(0.0,1867.3,498.2,51.2) bg=#000000 border=0
+  a rect=(0.0,1948.5,498.2,38.5) bg=#2e2459 border=1
+  div rect=(0.0,1818.1,498.2,168.9) bg=#000000 border=0
+  h3 rect=(498.2,1818.1,501.8,31.2) bg=#000000 border=0
+  p rect=(498.2,1867.3,501.8,51.2) bg=#000000 border=0
+  a rect=(498.2,1948.5,501.8,38.5) bg=#2e2459 border=1
+  div rect=(498.2,1818.1,501.8,168.9) bg=#000000 border=0
+  div rect=(0.0,1818.1,1000.0,168.9) bg=#000000 border=0
+  h3 rect=(0.0,1987.0,1000.0,31.2) bg=#000000 border=0
+  p rect=(0.0,2054.2,1000.0,51.2) bg=#000000 border=0
+  div rect=(0.0,1987.0,1000.0,148.4) bg=#000000 border=0
+  div rect=(0.0,1736.1,1000.0,399.3) bg=#000000 border=0
+  section rect=(0.0,1706.1,1000.0,489.3) bg=#a72145 border=0
+  h2 rect=(0.0,2235.4,1000.0,30.0) bg=#000000 border=0
+  div rect=(-10.0,2265.4,1000.0,12.0) bg=#ffc832 border=0
+  header rect=(0.0,2225.4,1000.0,82.0) bg=#000000 border=0
+  p rect=(0.0,2307.4,1000.0,24.0) bg=#000000 border=0
+  div rect=(0.0,2307.4,1000.0,54.0) bg=#000000 border=0
+  h3 rect=(0.0,2361.4,520.4,31.2) bg=#000000 border=0
+  p rect=(0.0,2410.6,520.4,51.2) bg=#000000 border=0
+  a rect=(0.0,2491.8,520.4,38.5) bg=#ffc832 border=1
+  div rect=(0.0,2361.4,520.4,168.9) bg=#000000 border=0
+  h3 rect=(520.4,2361.4,425.4,31.2) bg=#000000 border=0
+  p rect=(520.4,2410.6,425.4,51.2) bg=#000000 border=0
+  a rect=(520.4,2491.8,425.4,38.5) bg=#ffc832 border=1
+  div rect=(520.4,2361.4,425.4,168.9) bg=#000000 border=0
+  div rect=(0.0,2361.4,1000.0,168.9) bg=#000000 border=0
+  div rect=(0.0,2225.4,1000.0,304.9) bg=#000000 border=0
+  section rect=(0.0,2195.4,1000.0,394.9) bg=#000000 border=0
+  main rect=(0.0,328.0,1000.0,2262.2) bg=#000000 border=0
+  h4 rect=(0.0,2620.2,736.1,30.7) bg=#000000 border=0
+  li rect=(0.0,2676.0,736.1,25.6) bg=#000000 border=0
+  li rect=(0.0,2709.6,736.1,25.6) bg=#000000 border=0
+  li rect=(0.0,2743.2,736.1,25.6) bg=#000000 border=0
+  ul rect=(0.0,2672.0,736.1,100.8) bg=#000000 border=0
+  div rect=(0.0,2788.8,736.1,0.0) bg=#000000 border=0
+  div rect=(992.0,5000.0,0.0,25.6) bg=#000000 border=0
+  div rect=(0.0,2620.2,736.1,168.5) bg=#000000 border=0
+  h4 rect=(736.1,2620.2,134.4,30.7) bg=#000000 border=0
+  li rect=(736.1,2676.0,134.4,25.6) bg=#000000 border=0
+  li rect=(736.1,2709.6,134.4,25.6) bg=#000000 border=0
+  li rect=(736.1,2743.2,134.4,51.2) bg=#000000 border=0
+  li rect=(736.1,2802.4,134.4,25.6) bg=#000000 border=0
+  li rect=(736.1,2836.0,134.4,25.6) bg=#000000 border=0
+  li rect=(736.1,2869.6,134.4,25.6) bg=#000000 border=0
+  ul rect=(736.1,2672.0,134.4,227.2) bg=#000000 border=0
+  div rect=(736.1,2620.2,134.4,294.9) bg=#000000 border=0
+  h4 rect=(870.4,2620.2,129.6,30.7) bg=#000000 border=0
+  a rect=(870.4,2672.0,150.0,150.0) bg=#000000 border=0
+  a rect=(1020.4,2672.0,150.0,150.0) bg=#000000 border=0
+  a rect=(870.4,2822.0,150.0,150.0) bg=#000000 border=0
+  a rect=(1020.4,2822.0,150.0,150.0) bg=#000000 border=0
+  div rect=(870.4,2672.0,129.6,450.0) bg=#000000 border=0
+  div rect=(870.4,2620.2,129.6,501.7) bg=#000000 border=0
+  div rect=(0.0,2620.2,1000.0,501.7) bg=#000000 border=0
+  p rect=(0.0,3152.0,1000.0,25.6) bg=#000000 border=0
+  p rect=(0.0,3177.6,1000.0,25.6) bg=#000000 border=0
+  div rect=(0.0,3122.0,1000.0,81.2) bg=#000000 border=0
+  div rect=(0.0,2620.2,1000.0,582.9) bg=#000000 border=0
+  div rect=(992.0,5000.0,0.0,25.6) bg=#000000 border=0
+  footer rect=(0.0,2590.2,1000.0,642.9) bg=#2a3439 border=0
+  div rect=(992.0,5000.0,0.0,25.6) bg=#000000 border=0
+  body rect=(0.0,0.0,1000.0,3233.2) bg=#ffffff border=0
+  html rect=(0.0,0.0,1000.0,3233.2) bg=#000000 border=0
+  div rect=(992.0,5000.0,0.0,25.6) bg=#000000 border=0
+  div rect=(992.0,5000.0,0.0,25.6) bg=#000000 border=0
+TEXT:
+  (939.8,33.0) "Install" size=16.0 color=#2a3439 link=/tools/install
+  (970.9,33.0) "Learn" size=16.0 color=#2a3439 link=/learn
+  (936.9,62.6) "Playground" size=16.0 color=#2a3439 link=https://play.rust-lang.org/
+  (997.5,62.6) "Tools" size=16.0 color=#2a3439 link=/tools
+  (936.9,92.2) "Governance" size=16.0 color=#2a3439 link=/governance
+  (1000.0,92.2) "Funding" size=16.0 color=#2a3439 link=/funding
+  (936.9,121.8) "Community" size=16.0 color=#2a3439 link=/community
+  (998.5,121.8) "Blog" size=16.0 color=#2a3439 link=https://blog.rust-lang.org/
+  (147.8,175.0) "Language" size=16.0 color=#1a1a1a link=-
+  (203.1,175.0) "English (en-US) Español (es) Français (fr) Italiano (it) 日本語 (ja) Português (pt-BR) Русский (ru) Türkçe (tr) 简体中文 (zh-CN) 正體中文 (zh-TW)" size=16.0 color=#2a3439 link=-
+  (0.0,354.0) "Rust" size=32.0 color=#1a1a1a link=-
+  (0.0,404.9) "A language empowering" size=24.0 color=#1a1a1a link=-
+  (0.0,434.9) "everyone" size=24.0 color=#1a1a1a link=-
+  (0.0,464.9) "to build reliable and" size=24.0 color=#1a1a1a link=-
+  (0.0,494.9) "efficient software." size=24.0 color=#1a1a1a link=-
+  (311.1,417.8) "Vers" size=16.0 color=#4299bf link=https://blog.rust-lang.org/releases/latest
+  (314.2,443.4) "ion" size=16.0 color=#4299bf link=https://blog.rust-lang.org/releases/latest
+  (310.3,469.0) "1.99." size=16.0 color=#4299bf link=https://blog.rust-lang.org/releases/latest
+  (319.4,494.6) "1" size=16.0 color=#4299bf link=https://blog.rust-lang.org/releases/latest
+  (310.0,341.0) "Get" size=16.0 color=#000000 link=/learn/get-started
+  (310.0,366.6) "Star" size=16.0 color=#000000 link=/learn/get-started
+  (310.0,392.2) "ted" size=16.0 color=#000000 link=/learn/get-started
+  (0.0,582.7) "Why Rust?" size=24.0 color=#ffffff link=-
+  (0.0,624.7) "Performance" size=24.0 color=#ffffff link=-
+  (0.0,685.4) "Rust is blazingly fast and memory-efficient: with no runtime" size=16.0 color=#ffffff link=-
+  (0.0,709.4) "or garbage collector, it can power performance-critical" size=16.0 color=#ffffff link=-
+  (0.0,733.4) "services, run on embedded devices, and easily integrate" size=16.0 color=#ffffff link=-
+  (0.0,757.4) "with other languages." size=16.0 color=#ffffff link=-
+  (320.1,624.7) "Reliability" size=24.0 color=#ffffff link=-
+  (320.1,685.4) "Rust’s rich type system and ownership model" size=16.0 color=#ffffff link=-
+  (320.1,709.4) "guarantee memory-safety and thread-safety —" size=16.0 color=#ffffff link=-
+  (320.1,733.4) "enabling you to eliminate many classes of bugs" size=16.0 color=#ffffff link=-
+  (320.1,757.4) "at compile-time." size=16.0 color=#ffffff link=-
+  (581.9,624.7) "Productivity" size=24.0 color=#ffffff link=-
+  (581.9,685.4) "Rust has great documentation, a friendly compiler with useful error messages," size=16.0 color=#ffffff link=-
+  (581.9,709.4) "and top-notch tooling — an integrated package manager and build tool," size=16.0 color=#ffffff link=-
+  (581.9,733.4) "smart multi-editor support with auto-completion and type inspections, an" size=16.0 color=#ffffff link=-
+  (581.9,757.4) "auto-formatter, and more." size=16.0 color=#ffffff link=-
+  (0.0,917.9) "Build it in Rust" size=24.0 color=#ffffff link=-
+  (0.0,983.4) "In 2018, the Rust community decided to improve the programming experience for a few distinct domains (see" size=16.0 color=#ffffff link=-
+  (584.5,983.4) "the 2018 roadmap" size=16.0 color=#ffffff link=https://blog.rust-lang.org/2018/03/12/roadmap.html
+  (682.2,983.4) "). For these, you can find many high-quality crates and" size=16.0 color=#ffffff link=-
+  (0.0,1009.0) "some awesome guides on how to get started." size=16.0 color=#ffffff link=-
+  (73.1,1221.1) "Command Line" size=24.0 color=#ffffff link=-
+  (0.0,1263.8) "Whip up a CLI tool quickly with Rust’s robust" size=16.0 color=#ffffff link=-
+  (0.0,1289.4) "ecosystem. Rust helps you maintain your app with" size=16.0 color=#ffffff link=-
+  (0.0,1315.0) "confidence and distribute it with ease." size=16.0 color=#ffffff link=-
+  (103.7,1377.0) "Building Tools" size=12.8 color=#ffffff link=/what/cli
+  (345.4,1221.1) "WebAssembly" size=24.0 color=#ffffff link=-
+  (273.4,1263.8) "Use Rust to supercharge your JavaScript, one" size=16.0 color=#ffffff link=-
+  (273.4,1289.4) "module at a time. Publish to npm, bundle with" size=16.0 color=#ffffff link=-
+  (273.4,1315.0) "webpack, and you’re off to the races." size=16.0 color=#ffffff link=-
+  (363.0,1377.0) "Writing Web Apps" size=12.8 color=#ffffff link=/what/wasm
+  (593.7,1221.1) "Networking" size=24.0 color=#ffffff link=-
+  (537.4,1263.8) "Predictable performance. Tiny resource" size=16.0 color=#ffffff link=-
+  (537.4,1289.4) "footprint. Rock-solid reliability. Rust is" size=16.0 color=#ffffff link=-
+  (537.4,1315.0) "great for network services." size=16.0 color=#ffffff link=-
+  (598.1,1377.0) "Working On Servers" size=12.8 color=#ffffff link=/what/networking
+  (830.3,1221.1) "Embedded" size=24.0 color=#ffffff link=-
+  (750.9,1263.8) "Targeting low-resource devices? Need" size=16.0 color=#ffffff link=-
+  (750.9,1289.4) "low-level control without giving up high-level" size=16.0 color=#ffffff link=-
+  (750.9,1315.0) "conveniences? Rust has you covered." size=16.0 color=#ffffff link=-
+  (818.7,1377.0) "Starting With Embedded" size=12.8 color=#ffffff link=/what/embedded
+  (0.0,1515.6) "Rust in production" size=24.0 color=#000000 link=-
+  (0.0,1581.1) "Hundreds of companies around the world are using Rust in production today for fast, low-resource, cross-platform solutions." size=16.0 color=#000000 link=-
+  (664.1,1581.1) "From startups to large corporations, from embedded" size=16.0 color=#000000 link=-
+  (0.0,1605.1) "devices to scalable web services, Rust is a great fit." size=16.0 color=#000000 link=-
+  (0.0,1765.6) "Get involved" size=24.0 color=#ffffff link=-
+  (0.0,1837.6) "Read Rust" size=24.0 color=#ffffff link=-
+  (0.0,1880.3) "We love documentation! Take a look at the books available online, as well as key blog posts" size=16.0 color=#ffffff link=-
+  (0.0,1905.9) "and user guides." size=16.0 color=#ffffff link=-
+  (215.7,1967.9) "Read the book" size=12.8 color=#ffffff link=learn
+  (498.2,1837.6) "Watch Rust" size=24.0 color=#ffffff link=-
+  (498.2,1880.3) "The Rust community has a dedicated YouTube channel collecting a huge range of" size=16.0 color=#ffffff link=-
+  (498.2,1905.9) "presentations and tutorials." size=16.0 color=#ffffff link=-
+  (708.7,1967.9) "Watch the Videos" size=12.8 color=#ffffff link=https://www.youtube.com/channel/UCaYhcUwRBNscFNUKTjgPFiA
+  (0.0,2006.4) "Contribute code" size=24.0 color=#ffffff link=-
+  (0.0,2067.1) "Rust is truly a community effort, and we welcome contribution from hobbyists and production users, from newcomers and seasoned professionals. Come help us make the Rust experience" size=16.0 color=#ffffff link=-
+  (0.0,2092.7) "even better!" size=16.0 color=#ffffff link=-
+  (0.0,1997.3) "Read Contribution Guide" size=12.8 color=#ffffff link=https://rustc-dev-guide.rust-lang.org/getting-started.html
+  (0.0,2254.8) "Thanks" size=24.0 color=#000000 link=-
+  (0.0,2320.3) "Rust would not exist without the generous contributions of time, work, and resources from individuals and companies. We are very grateful for the support!" size=16.0 color=#000000 link=-
+  (0.0,2380.8) "Individuals" size=24.0 color=#000000 link=-
+  (0.0,2423.5) "Rust is a community project and is very thankful for the many community contributions it" size=16.0 color=#000000 link=-
+  (0.0,2449.1) "receives." size=16.0 color=#000000 link=-
+  (198.2,2511.1) "See individual contributors" size=12.8 color=#2a3439 link=https://thanks.rust-lang.org/
+  (520.4,2380.8) "Corporate sponsors" size=24.0 color=#000000 link=-
+  (520.4,2423.5) "The Rust project receives support from companies through the Rust" size=16.0 color=#000000 link=-
+  (520.4,2449.1) "Foundation." size=16.0 color=#000000 link=-
+  (674.7,2511.1) "See Foundation members" size=12.8 color=#2a3439 link=https://foundation.rust-lang.org/members
+  (0.0,2635.8) "Get help!" size=19.2 color=#ffffff link=-
+  (0.0,2688.9) "Documentation" size=16.0 color=#ffc832 link=/learn
+  (0.0,2722.5) "Rust Forge (Contributor Documentation)" size=16.0 color=#ffc832 link=http://forge.rust-lang.org
+  (0.0,2756.1) "Ask a Question on the Users Forum" size=16.0 color=#ffc832 link=https://users.rust-lang.org
+  (992.0,5013.0) "Language English (en-US) Español (es) Français (fr) Italiano (it) 日本語 (ja) Português (pt-BR) Русский (ru) Türkçe (tr) 简体中文 (zh-CN) 正體中文 (zh-TW)" size=16.0 color=#2a3439 link=-
+  (736.1,2635.8) "Terms and policies" size=19.2 color=#ffffff link=-
+  (736.1,2688.9) "Code of Conduct" size=16.0 color=#ffc832 link=/policies/code-of-conduct
+  (736.1,2722.5) "Licenses" size=16.0 color=#ffc832 link=/policies/licenses
+  (736.1,2756.1) "Logo Policy and Media" size=16.0 color=#ffc832 link=https://foundation.rust-lang.org/policies/logo-policy-and-media-guide/
+  (736.1,2781.7) "Guide" size=16.0 color=#ffc832 link=https://foundation.rust-lang.org/policies/logo-policy-and-media-guide/
+  (736.1,2815.3) "Security Disclosures" size=16.0 color=#ffc832 link=/policies/security
+  (736.1,2848.9) "Privacy Notice" size=16.0 color=#ffc832 link=https://foundation.rust-lang.org/policies/privacy-policy/
+  (736.1,2882.5) "All Policies" size=16.0 color=#ffc832 link=/policies
+  (870.4,2635.8) "Social" size=19.2 color=#ffffff link=-
+  (355.1,3164.9) "Maintained by the Rust Team. See a bug?" size=16.0 color=#ffffff link=-
+  (577.8,3164.9) "File an issue!" size=16.0 color=#ffc832 link=https://github.com/rust-lang/www.rust-lang.org/issues/new/choose
+  (401.0,3190.5) "Web site built every day at 22:00 UTC" size=16.0 color=#ffffff link=-
+  (992.0,5013.0) "Language English (en-US) Español (es) Français (fr) Italiano (it) 日本語 (ja) Português (pt-BR) Русский (ru) Türkçe (tr) 简体中文 (zh-CN) 正體中文 (zh-TW)" size=16.0 color=#2a3439 link=-
+  (992.0,5013.0) "Language English (en-US) Español (es) Français (fr) Italiano (it) 日本語 (ja) Português (pt-BR) Русский (ru) Türkçe (tr) 简体中文 (zh-CN) 正體中文 (zh-TW)" size=16.0 color=#2a3439 link=-
+  (992.0,5013.0) "Language" size=16.0 color=#1a1a1a link=-
+  (1047.3,5013.0) "English (en-US) Español (es) Français (fr) Italiano (it) 日本語 (ja) Português (pt-BR) Русский (ru) Türkçe (tr) 简体中文 (zh-CN) 正體中文 (zh-TW)" size=16.0 color=#2a3439 link=-
+  (992.0,5013.0) "Language English (en-US) Español (es) Français (fr) Italiano (it) 日本語 (ja) Português (pt-BR) Русский (ru) Türkçe (tr) 简体中文 (zh-CN) 正體中文 (zh-TW)" size=16.0 color=#2a3439 link=-

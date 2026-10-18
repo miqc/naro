@@ -1,0 +1,70 @@
+TITLE: Example Domain
+URL: https://example.com/
+STATUS: Idle
+SYNC: restyle=0 relayout=0 repaint=0
+CSS: rules=4 invalid=0 pseudo-element=0 unsupported-not=0 at-rule=0 interactive=0 unsupported-pseudo=0
+CONTENT_HEIGHT: 776.60
+DOM:
+<document>
+  html
+    head
+      meta
+      link
+      meta
+      title
+        "Example Domain"
+      style
+        "html{color-scheme:light dark;background:light-dark(#eee,#222)}body{font:16px/1.6 system-ui,sans-serif;max-width:26em;margin:auto;padding:25vh 2em 2em;text-align:center}"
+    body
+      style
+        "svg{display:block;margin:-2.75em auto 0;opacity:.55}p+p{font-size:.875em;opacity:.6}"
+      svg
+        path
+        g
+          path#q
+          use
+      p
+        "هذا النطاق مُخصص للاستخدام في أمثلة التوثيق دون الحاجة إلى إذن. هذه ليست خدمة، يُرجى تجنب الاعتماد عليها لأغراض الاختبار والمراقبة."
+      p
+        "该域名仅用于文档示例，无需获得许可。这并非一项服务，请勿将其用于测试和监控目的。"
+      p
+        "L’usage de ce domaine est réservé à des exemples de documentation, sans autorisation préalable.  Il ne s’agit pas d’un service ; son utilisation à des fins de test ou de surveillance est à éviter."
+      p
+        "Данный домен предназначен для использования в примерах документации без необходимости получения предварительного разрешения. Это не сервис; не рекомендуется его использование для тестирования и мониторинга."
+      p
+        "Este dominio está destinado al uso en ejemplos de documentación sin necesidad de permiso. Esto no es un servicio; evitar utilizarlo para realizar pruebas o monitoreos."
+      a
+        "Learn more"
+      script
+      p
+        "This domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes."
+  "
+"
+BLOCKS:
+  svg rect=(292.0,131.0,416.0,0.0) bg=#000000 border=0
+  p rect=(292.0,191.0,416.0,76.8) bg=#000000 border=0
+  p rect=(292.0,299.8,416.0,44.8) bg=#000000 border=0
+  p rect=(292.0,376.6,416.0,67.2) bg=#000000 border=0
+  p rect=(292.0,475.8,416.0,67.2) bg=#000000 border=0
+  p rect=(292.0,575.0,416.0,44.8) bg=#000000 border=0
+  p rect=(292.0,651.8,416.0,76.8) bg=#000000 border=0
+  body rect=(260.0,0.0,480.0,776.6) bg=#ffffff border=0
+  html rect=(0.0,0.0,1000.0,776.6) bg=#000000 border=0
+TEXT:
+  (294.9,204.0) "هذا النطاق مُخصص للاستخدام في أمثلة التوثيق دون الحاجة إلى إذن." size=16.0 color=#1a1a1a link=-
+  (322.6,229.6) "هذه ليست خدمة، يُرجى تجنب الاعتماد عليها لأغراض الاختبار" size=16.0 color=#1a1a1a link=-
+  (469.6,255.2) "والمراقبة." size=16.0 color=#1a1a1a link=-
+  (293.2,311.2) "该域名仅用于文档示例，无需获得许可。这并非一项服务，请勿将其用于测试和监控目的" size=14.0 color=#1a1a1a link=-
+  (494.7,333.6) "。" size=14.0 color=#1a1a1a link=-
+  (297.6,388.0) "L’usage de ce domaine est réservé à des exemples de documentation, sans autorisation" size=14.0 color=#1a1a1a link=-
+  (293.9,410.4) "préalable. Il ne s’agit pas d’un service ; son utilisation à des fins de test ou de surveillance" size=14.0 color=#1a1a1a link=-
+  (473.6,432.8) "est à éviter." size=14.0 color=#1a1a1a link=-
+  (305.1,487.2) "Данный домен предназначен для использования в примерах документации без" size=14.0 color=#1a1a1a link=-
+  (312.7,509.6) "необходимости получения предварительного разрешения. Это не сервис; не" size=14.0 color=#1a1a1a link=-
+  (332.8,532.0) "рекомендуется его использование для тестирования и мониторинга." size=14.0 color=#1a1a1a link=-
+  (305.0,586.4) "Este dominio está destinado al uso en ejemplos de documentación sin necesidad de" size=14.0 color=#1a1a1a link=-
+  (308.3,608.8) "permiso. Esto no es un servicio; evitar utilizarlo para realizar pruebas o monitoreos." size=14.0 color=#1a1a1a link=-
+  (321.8,664.8) "This domain is for use in documentation examples without needing" size=16.0 color=#1a1a1a link=-
+  (294.2,690.4) "permission. This is not a service; avoid relying on it for testing and monitoring" size=16.0 color=#1a1a1a link=-
+  (474.4,716.0) "purposes." size=16.0 color=#1a1a1a link=-
+  (469.9,188.0) "Learn more" size=16.0 color=#1a56db link=https://iana.org/help/example-domains

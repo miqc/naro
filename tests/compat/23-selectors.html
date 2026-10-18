@@ -1,0 +1,20 @@
+<!doctype html><html><head><title>23 Seletores</title><style>
+body{margin:0;font-size:16px}
+.card > .title { color: #0a7d3f }
+.card + .card { color: #8a1f1f }
+a:hover { color: #ff0000 }
+input[type=text] { color: #1558d6 }
+[data-state=on] { color: #681da8 }
+li:first-child { color: #b45309 }
+li:nth-child(2) { color: #0e7490 }
+.never { color: #0f766e !important }
+.never { color: #334155 }
+</style></head><body>
+<div class="card"><p class="title">titulo do card</p></div>
+<div class="card"><p>segundo card</p></div>
+<p><a href="#x">link estatico</a></p>
+<div><input type="text" value="campo texto"><input type="submit" value="botao"></div>
+<p data-state="on">estado ligado</p>
+<ul><li>primeiro item</li><li>segundo item</li></ul>
+<p class="never">importante vence</p>
+</body></html>

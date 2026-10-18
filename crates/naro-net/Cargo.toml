@@ -1,0 +1,11 @@
+[package]
+name = "naro-net"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ureq.workspace = true
+url.workspace = true
+naro-html.workspace = true
+native-tls = "0.2"

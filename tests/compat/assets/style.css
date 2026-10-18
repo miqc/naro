@@ -1,0 +1,5 @@
+body { margin: 0; font-size: 16px; }
+.bar { background-color: #101418; color: #ffffff; padding: 12px; }
+.bar h1 { font-size: 24px; margin: 0; }
+.wrap { max-width: 500px; margin: 0 auto; padding: 16px; }
+.lead { color: #0a7d3f; font-weight: 700; }

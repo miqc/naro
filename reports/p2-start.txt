@@ -1,0 +1,92 @@
+TITLE: NARO — Início
+URL: naro://start
+STATUS: Idle
+CSS: rules=10 invalid=0 pseudo-element=0 unsupported-not=0 at-rule=0 interactive=0 unsupported-pseudo=0
+CONTENT_HEIGHT: 606.40
+DOM:
+<document>
+  "
+"
+  html
+    head
+      title
+        "NARO — Início"
+      "
+"
+      style
+        "
+body { margin: 0; background-color: #f7f8fa; color: #14161a"
+    "
+"
+    body
+      "
+"
+      div.hero
+        h1
+          "NARO"
+        p
+          "Navegador experimental escrito em Rust. Motor próprio, sem W"
+      "
+"
+      div.content
+        "
+"
+        p.badge
+          "Primeiro fluxo funcional"
+        "
+"
+        h2
+          "O que já funciona"
+        "
+"
+        p
+          "HTML básico, CSS essencial, layout de blocos e texto, pintur"
+        "
+"
+        hr
+        "
+"
+        h2
+          "Experimente"
+        "
+"
+        p
+          "Digite um endereço na barra acima ou abra "
+          a
+            "example.com"
+          "."
+        "
+"
+        p
+          "Atalhos: Ctrl+L foca a barra, Enter navega, Alt+←/→ históric"
+        "
+"
+      "
+"
+  "
+"
+BLOCKS:
+  h1 rect=(56.0,48.0,888.0,59.4) bg=#000000 border=0
+  p rect=(56.0,123.4,888.0,27.0) bg=#000000 border=0
+  div rect=(0.0,0.0,1000.0,198.4) bg=#101418 border=0
+  p rect=(56.0,240.4,888.0,24.0) bg=#000000 border=0
+  h2 rect=(56.0,298.4,888.0,27.0) bg=#000000 border=0
+  p rect=(56.0,343.4,888.0,24.0) bg=#000000 border=0
+  hr rect=(56.0,401.4,888.0,2.0) bg=#000000 border=1
+  h2 rect=(56.0,451.4,888.0,27.0) bg=#000000 border=0
+  p rect=(56.0,496.4,888.0,24.0) bg=#000000 border=0
+  p rect=(56.0,540.4,888.0,24.0) bg=#000000 border=0
+  div rect=(0.0,198.4,1000.0,408.0) bg=#000000 border=0
+  body rect=(0.0,0.0,1000.0,606.4) bg=#f7f8fa border=0
+  html rect=(0.0,0.0,1000.0,606.4) bg=#000000 border=0
+TEXT:
+  (56.0,83.7) "NARO" size=44.0 color=#ffffff link=-
+  (56.0,138.0) "Navegador experimental escrito em Rust. Motor próprio, sem WebView." size=18.0 color=#c7ccd4 link=-
+  (56.0,253.4) "Primeiro fluxo funcional" size=16.0 color=#0a7d3f link=-
+  (56.0,314.6) "O que já funciona" size=20.0 color=#14161a link=-
+  (56.0,356.4) "HTML básico, CSS essencial, layout de blocos e texto, pintura em software, navegação pela barra de endereços, histórico e recarregamento." size=16.0 color=#14161a link=-
+  (56.0,467.6) "Experimente" size=20.0 color=#14161a link=-
+  (56.0,509.4) "Digite um endereço na barra acima ou abra" size=16.0 color=#14161a link=-
+  (289.8,509.4) "example.com" size=16.0 color=#1a56db link=https://example.com
+  (360.0,509.4) "." size=16.0 color=#14161a link=-
+  (56.0,553.4) "Atalhos: Ctrl+L foca a barra, Enter navega, Alt+←/→ histórico, F5 recarrega." size=16.0 color=#14161a link=-

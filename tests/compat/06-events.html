@@ -1,0 +1,11 @@
+<!doctype html><html><head><title>06 Eventos</title></head><body>
+<div id="pai"><div id="filho">alvo</div></div>
+<pre id="log"></pre>
+<script>
+var log = document.getElementById('log');
+function note(s) { log.textContent = log.textContent + s + ' '; }
+document.getElementById('pai').addEventListener('click', function () { note('pai'); });
+document.getElementById('filho').addEventListener('click', function () { note('filho'); });
+document.getElementById('filho').click();
+</script>
+</body></html>

@@ -1,0 +1,46 @@
+# file | checks
+#   text:X      -> rendered text runs must contain X
+#   notext:X    -> must not contain X
+#   imgs:N      -> exactly N images laid out
+#   blocks:N    -> at least N block boxes
+#   runs:N      -> at least N text runs
+#   log:X       -> a JS log line contains X
+#   runcolor:RRGGBB -> some text run has exactly this colour
+#   noruncolor:RRGGBB -> no text run has this colour
+#   blockbg:tag:RRGGBB -> some block of that tag has this background
+#   blockw:tag:W -> first block of that tag is at least W wide
+#   click:SEL   -> dispatch a click on the centre of the first element matching SEL
+#   restyle:N   -> the cascade was recomputed exactly N times
+#   relayout:N  -> the boxes were rebuilt exactly N times
+#   nojsrerror   -> no JS error recorded
+#   unsupported:reason -> case is known-unsupported, counted separately
+01-plain.html | text:Sem JavaScript | text:Segundo parágrafo. | nojsrerror
+02-css.html | text:Título da barra | text:Lead com destaque. | blocks:4 | nojsrerror
+03-flex.html | text:A | text:Fim | blocks:6 | nojsrerror
+04-images.html | imgs:2 | text:Intrínseca: | nojsrerror
+05-js-dom.html | text:depois do script | text:criado dinamicamente | nojsrerror
+06-events.html | text:filho pai | nojsrerror
+07-timers.html | text:timer rodou | nojsrerror
+08-forms.html | text:input:novo | nojsrerror
+09-links.html | text:relativo | nojsrerror
+10-text.html | text:ação | text:日本語 | text:endereços | nojsrerror
+11-underline.html | text:este link | nojsrerror
+12-lists.html | text:Primeiro item | text:• | nojsrerror
+13-height.html | text:depois | blocks:2 | nojsrerror
+# checks visuais
+# forms: o runner não simula digitação; coberto por --form
+14-form.html | text:Nome | text:digite | unsupported:interação de digitação requer --form
+15-grid.html | text:Ocupa duas colunas | text:fim | blocks:8 | nojsrerror
+16-inline.html | text:Enviar | text:depois | blocks:8 | nojsrerror
+17-center.html | text:texto centralizado | notext:NAO-DEVE-APARECER | notext:oculto | imgs:1 | nojsrerror
+18-controls.html | text:texto fora do campo | blocks:5 | nojsrerror
+19-extscript.html | text:ola-do-externo | log:ext carregado: true | nojsrerror
+20-domapi.html | text:cls:true,true | text:filho:1 | nojsrerror
+21-media-mutation.html | text:obs=attributes:data-x | text:texto alvo | nojsrerror
+22-table-layout.html | text:celula A | text:depois da tabela | blocks:8 | nojsrerror
+23-selectors.html | text:titulo do card | runcolor:0a7d3f | runcolor:8a1f1f | runcolor:1558d6 | runcolor:681da8 | runcolor:b45309 | runcolor:0e7490 | runcolor:0f766e | nojsrerror
+24-units.html | text:largura calculada | blockw:section:799 | blockw:article:499 | blockw:aside:499 | blockw:nav:499 | blockw:div:399 | blockh:main:70 | blockh:header:40 | nojsrerror
+25-dynamic-style.html | text:alvo | click:#go | runcolor:0a7d3f | runcolor:681da8 | runcolor:8a1f1f | runcolor:b45309 | runcolor:0f766e | noruncolor:0e7490 | log:obs=attributes:data-state | text:elemento novo | notext:elemento removido | restyle:1 | relayout:1 | click:#cor | runcolor:1558d6 | blockbg:p:0e7490 | restyle:2 | relayout:1 | nojsrerror
+26-dom-api.html | log:same=true | log:tree=true | log:parent=wrap | log:rect=20,20,224,64 | log:edges=true | log:offset=224,64 | log:client=220,60 | log:ds=42 | log:ds2=on | log:ds3=true | log:matches=true,false | log:closest=box | log:adjacent=first,last,before,after | log:text=true,true | log:removed=true | log:kept=true,true | log:before=100 later=150 | nojsrerror
+27-layout-sizing.html | text:depois | box:#row:600x40 | box:#icon:36x36 | box:#iconbox:36x36 | box:#iconbox svg:36x36 | box:#fill:564x40 | nojsrerror
+28-shadow-dom.html | text:dentro do componente | text:fora do componente | text:tarde | runcolor:0a7d3f | runcolor:8a1f1f | runcolor:b45309 | blockbg:x-card:681da8 | log:pronto=true,true | nojsrerror

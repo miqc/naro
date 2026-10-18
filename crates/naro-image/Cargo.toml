@@ -1,0 +1,9 @@
+[package]
+name = "naro-image"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+png = "0.17.16"
+jpeg-decoder = "0.3.1"
