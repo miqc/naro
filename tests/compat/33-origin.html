@@ -1,0 +1,33 @@
+<!doctype html><html><head><title>33 Origem</title>
+<meta http-equiv="Content-Security-Policy" content="img-src 'self'; script-src 'self' 'unsafe-inline'">
+</head><body>
+<h1>Origem</h1>
+<p id="out">inicial</p>
+<img id="remote" src="http://localhost:__PORT__/assets/red.png" alt="remota">
+<script>
+const log = (key, value) => console.log(key + "=" + value);
+
+// Same origin: a same-origin fetch is always delivered.
+fetch("__json")
+  .then((res) => res.text())
+  .then((text) => log("same.ok", text.length > 0))
+  .catch((err) => log("same.ok", "erro:" + err.message));
+
+// Cross-origin with `Access-Control-Allow-Origin: *`: delivered. `localhost`
+// and `127.0.0.1` are different origins even on the same port.
+fetch("http://localhost:__PORT__/__cors")
+  .then((res) => res.text())
+  .then((text) => log("cross.star", text))
+  .catch((err) => log("cross.star", "erro:" + err.message));
+
+// Cross-origin without the header: script must never see the body.
+fetch("http://localhost:__PORT__/__nocors")
+  .then((res) => res.text())
+  .then((text) => log("cross.blocked", "vazou:" + text))
+  .catch((err) => log("cross.blocked", err instanceof TypeError));
+
+// The document really is served over http from 127.0.0.1.
+log("doc.origin", location.origin.indexOf("http://127.0.0.1") === 0);
+document.getElementById("out").textContent = "origem ok";
+</script>
+</body></html>

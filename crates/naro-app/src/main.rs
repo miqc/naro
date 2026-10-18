@@ -1903,6 +1903,7 @@ fn serve_one(
         *counts.entry(format!("/{path}")).or_insert(0) += 1;
     }
 
+    let local_port = stream.local_addr().map(|a| a.port()).unwrap_or(0);
     let mut respond = |status: &str, headers: &[(&str, String)], body: &[u8]| -> std::io::Result<()> {
         let mut head = format!(
             "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n",
@@ -1916,6 +1917,21 @@ fn serve_one(
         stream.write_all(body)?;
         stream.flush()
     };
+
+    // `/__port` — the port this server listens on, so a page can build a
+    // second origin from the same host (`127.0.0.1` vs `localhost` is a
+    // different origin, which is exactly what a CORS check needs).
+    if path == "__port" {
+        let port = local_port.to_string();
+        return respond(
+            "200 OK",
+            &[
+                ("Content-Type", "text/plain".to_string()),
+                ("Cache-Control", "no-store".to_string()),
+            ],
+            port.as_bytes(),
+        );
+    }
 
     // `/__count?p=/page.html` — how many times that path was requested.
     if path == "__count" {
@@ -2005,6 +2021,49 @@ fn serve_one(
         );
     }
 
+    // `/__cors` — a cross-origin response that allows everyone.
+    if path == "__cors" {
+        return respond(
+            "200 OK",
+            &[
+                ("Content-Type", "text/plain; charset=utf-8".to_string()),
+                ("Access-Control-Allow-Origin", "*".to_string()),
+                ("Cache-Control", "no-store".to_string()),
+            ],
+            b"cors-ok",
+        );
+    }
+
+    // `/__nocors` — a cross-origin response that allows nobody.
+    if path == "__nocors" {
+        return respond(
+            "200 OK",
+            &[
+                ("Content-Type", "text/plain; charset=utf-8".to_string()),
+                ("Cache-Control", "no-store".to_string()),
+            ],
+            b"segredo",
+        );
+    }
+
+    // `/__csp.html` — a page whose policy allows only its own origin, so the
+    // external script it references must be dropped.
+    if path == "__csp.html" {
+        let body = br#"<!doctype html><html><head><title>csp</title>
+<meta http-equiv="Content-Security-Policy" content="script-src 'self'">
+</head><body><p>pagina com csp</p>
+<script src="__cors-script.js"></script>
+</body></html>"#;
+        return respond(
+            "200 OK",
+            &[
+                ("Content-Type", "text/html; charset=utf-8".to_string()),
+                ("Cache-Control", "no-store".to_string()),
+            ],
+            body,
+        );
+    }
+
     // `/__json` — a JSON body for `response.json()`.
     if path == "__json" {
         return respond(
@@ -2056,6 +2115,17 @@ fn serve_one(
         "svg" => "image/svg+xml",
         _ => "text/plain; charset=utf-8",
     };
+    // A fixture may need to name this server's own port (to build a second
+    // origin), so `__PORT__` is substituted in HTML bodies. Every other type
+    // is sent byte for byte: a PNG put through a string conversion is a
+    // corrupt PNG.
+    let body = if content_type.starts_with("text/html") {
+        String::from_utf8_lossy(&bytes)
+            .replace("__PORT__", &local_port.to_string())
+            .into_bytes()
+    } else {
+        bytes
+    };
     respond(
         "200 OK",
         &[
@@ -2063,7 +2133,7 @@ fn serve_one(
             // Pages must not be cached: the corpus is re-read every run.
             ("Cache-Control", "no-store".to_string()),
         ],
-        &bytes,
+        &body,
     )
 }
 
@@ -2545,6 +2615,19 @@ fn run_compat(dir: &str, serve: bool, verbose: bool) -> i32 {
                             ok = false;
                             notes.push(format!("atributo ausente: {selector} @{name}"));
                         }
+                    }
+                }
+                "blocked" => {
+                    // blocked:<trecho> — a subresource was refused by the
+                    // origin policy, and the report names it.
+                    let hit = engine
+                        .js
+                        .errors
+                        .iter()
+                        .any(|e| e.contains("bloqueado") && e.contains(value));
+                    if !hit {
+                        ok = false;
+                        notes.push(format!("recurso não bloqueado: {value:?}"));
                     }
                 }
                 "nojsrerror" => {

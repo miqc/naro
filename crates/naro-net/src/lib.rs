@@ -14,6 +14,11 @@ use naro_html::escape_html;
 pub struct FetchedPage {
     pub url: String,
     pub html: String,
+    /// Subresources the origin policy refused, so the caller can report them
+    /// instead of leaving a silently missing stylesheet.
+    pub blocked: Vec<String>,
+    /// The document's Content-Security-Policy, from the header or a `<meta>`.
+    pub csp: Option<Csp>,
     /// Pre-fetched `<img src>` payloads, keyed by absolute URL. Images are
     /// fetched off the UI thread together with the document so `set_html`
     /// never blocks on the network.
@@ -30,11 +35,218 @@ pub struct HttpResponse {
     pub url: String,
     pub content_type: String,
     pub body: Vec<u8>,
+    /// Lower-cased header names to values. Only the headers a page can
+    /// observe are kept, which is what a browser exposes.
+    pub headers: Vec<(String, String)>,
 }
 
 impl HttpResponse {
     pub fn text(&self) -> String {
         decode_body(&self.body, &self.content_type)
+    }
+
+    pub fn header(&self, name: &str) -> Option<&str> {
+        let name = name.to_ascii_lowercase();
+        self.headers
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, v)| v.as_str())
+    }
+}
+
+/// A scheme/host/port triple, the unit the same-origin policy compares.
+///
+/// `file://` has no host worth speaking of, so every file is its own opaque
+/// origin: a local page must not read the network, and the network must not
+/// read a local file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Origin {
+    pub scheme: String,
+    pub host: String,
+    pub port: u16,
+}
+
+impl Origin {
+    /// The origin of `url`, or `None` when it cannot be parsed.
+    pub fn of(url: &str) -> Option<Origin> {
+        let parsed = url::Url::parse(url).ok()?;
+        let scheme = parsed.scheme().to_ascii_lowercase();
+        let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
+        let port = parsed.port_or_known_default().unwrap_or(0);
+        Some(Origin { scheme, host, port })
+    }
+
+    /// `https://host:port`, the serialization a `CORS` header uses.
+    pub fn serialize(&self) -> String {
+        match (self.scheme.as_str(), self.port) {
+            ("http", 80) | ("https", 443) => format!("{}://{}", self.scheme, self.host),
+            _ => format!("{}://{}:{}", self.scheme, self.host, self.port),
+        }
+    }
+
+    /// `file:` and other local schemes are never same-origin with anything.
+    pub fn is_local(&self) -> bool {
+        matches!(self.scheme.as_str(), "file" | "naro" | "data" | "about")
+    }
+
+    pub fn same_origin(&self, other: &Origin) -> bool {
+        !self.is_local() && self == other
+    }
+
+    /// Does `header` (an `Access-Control-Allow-Origin` value) admit this
+    /// origin? `*` admits anything non-local.
+    pub fn allowed_by(&self, header: &str) -> bool {
+        let header = header.trim();
+        if header == "*" {
+            return !self.is_local();
+        }
+        match Origin::of(header) {
+            Some(allowed) => !self.is_local() && &allowed == self,
+            None => false,
+        }
+    }
+}
+
+/// A Content-Security-Policy, reduced to the three fetch directives that
+/// matter for what a page can pull in.
+///
+/// `'self'`, `'none'` and explicit hosts are understood; nonces, hashes and
+/// the other keyword sources are parsed and ignored, which fails closed for
+/// inline script (the engine does not distinguish inline from external yet,
+/// so a `script-src` without a host simply blocks every script).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Csp {
+    /// Lower-cased source lists per directive.
+    pub script_src: Option<Vec<String>>,
+    pub style_src: Option<Vec<String>>,
+    pub img_src: Option<Vec<String>>,
+    /// `default-src`, the fallback for any directive not given.
+    pub default_src: Option<Vec<String>>,
+}
+
+impl Csp {
+    /// Parse a policy header. `None` when it declares nothing usable.
+    pub fn parse(header: &str) -> Option<Csp> {
+        let mut csp = Csp::default();
+        let mut any = false;
+        for directive in header.split(';') {
+            let mut parts = directive.split_whitespace();
+            let Some(name) = parts.next() else { continue };
+            let sources: Vec<String> = parts.map(|s| s.to_ascii_lowercase()).collect();
+            match name.to_ascii_lowercase().as_str() {
+                "script-src" => {
+                    csp.script_src = Some(sources);
+                    any = true;
+                }
+                "style-src" => {
+                    csp.style_src = Some(sources);
+                    any = true;
+                }
+                "img-src" => {
+                    csp.img_src = Some(sources);
+                    any = true;
+                }
+                "default-src" => {
+                    csp.default_src = Some(sources);
+                    any = true;
+                }
+                _ => {}
+            }
+        }
+        if any {
+            Some(csp)
+        } else {
+            None
+        }
+    }
+
+    /// May `kind` load `url` from a document at `page_url`?
+    ///
+    /// An absent policy allows everything, which is the only behaviour that
+    /// cannot break a page that declared nothing.
+    pub fn allows(&self, kind: &str, page_url: &str, url: &str) -> bool {
+        let list = match kind {
+            "script" => self.script_src.as_ref().or(self.default_src.as_ref()),
+            "style" => self.style_src.as_ref().or(self.default_src.as_ref()),
+            "img" => self.img_src.as_ref().or(self.default_src.as_ref()),
+            _ => self.default_src.as_ref(),
+        };
+        let Some(list) = list else { return true };
+        if list.iter().any(|s| s == "'none'") {
+            return false;
+        }
+        let target = match Origin::of(url) {
+            Some(origin) => origin,
+            None => return true,
+        };
+        let page = Origin::of(page_url);
+        for source in list {
+            match source.as_str() {
+                "'self'" => {
+                    if let Some(page) = &page {
+                        if &target == page {
+                            return true;
+                        }
+                    }
+                }
+                "*" => return true,
+                // A bare host, optionally with a scheme and a wildcard.
+                _ => {
+                    let cleaned = source
+                        .trim_start_matches("https://")
+                        .trim_start_matches("http://")
+                        .trim_start_matches("*.");
+                    let host = cleaned.split('/').next().unwrap_or("");
+                    if host.is_empty() {
+                        continue;
+                    }
+                    if target.host == host || target.host.ends_with(&format!(".{host}")) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+}
+
+/// What a cross-origin request is allowed to do, per the response headers.
+pub enum CorsVerdict {
+    /// Same origin, or an opaque `file://` origin talking to itself.
+    Allowed,
+    /// Cross-origin and permitted by `Access-Control-Allow-Origin`.
+    AllowedCross,
+    /// Cross-origin and not permitted: the body must not reach script.
+    Blocked(String),
+}
+
+/// Decide whether a response may be handed to script running at `page`.
+pub fn cors_verdict(page: Option<&Origin>, response: &HttpResponse) -> CorsVerdict {
+    let Some(page) = page else {
+        // No page origin (a headless load): nothing to enforce.
+        return CorsVerdict::Allowed;
+    };
+    let Some(target) = Origin::of(&response.url) else {
+        return CorsVerdict::Allowed;
+    };
+    if page.same_origin(&target) {
+        return CorsVerdict::Allowed;
+    }
+    if page.is_local() || target.is_local() {
+        // A local page cannot reach the network and the network cannot reach
+        // a local file: this is the rule that keeps `file://` from being a
+        // bypass for every other policy.
+        return CorsVerdict::Blocked(format!(
+            "origem local não acessa {}",
+            target.serialize()
+        ));
+    }
+    match response.header("access-control-allow-origin") {
+        Some(value) if page.allowed_by(value) => CorsVerdict::AllowedCross,
+        _ => CorsVerdict::Blocked(format!(
+            "CORS bloqueou {}",
+            target.serialize()
+        )),
     }
 }
 
@@ -122,6 +334,9 @@ impl NetSession {
         }
         let final_url = response.url.clone();
         let content_type = response.content_type.to_ascii_lowercase();
+        let response_csp = response
+            .header("content-security-policy")
+            .map(|v| v.to_string());
         let text = response.text();
 
         let is_html = content_type.is_empty()
@@ -130,8 +345,12 @@ impl NetSession {
             || content_type.contains("text/xml")
             || content_type.contains("application/xml");
 
+        let mut blocked = Vec::new();
+        // The policy is read once, before any subresource moves: a header
+        // beats a `<meta>`, and an absent policy allows everything.
+        let csp = self.policy_of(response_csp.as_deref(), &text);
         let html = if is_html {
-            self.inline_stylesheets(&final_url, &text)
+            self.inline_stylesheets(&final_url, &text, &mut blocked, &csp)
         } else {
             format!(
                 "<!doctype html><html><head><title>{}</title></head><body><pre>{}</pre></body></html>",
@@ -140,12 +359,14 @@ impl NetSession {
             )
         };
 
-        let mut images = self.fetch_images(&final_url, &html);
-        images.extend(self.fetch_scripts(&final_url, &html));
+        let mut images = self.fetch_images(&final_url, &html, &mut blocked, &csp);
+        images.extend(self.fetch_scripts(&final_url, &html, &mut blocked, &csp));
         Ok(FetchedPage {
             url: final_url,
             html,
             images,
+            blocked,
+            csp,
         })
     }
 
@@ -160,13 +381,18 @@ impl NetSession {
             return Err(format!("HTTP {} em {}", response.status, response.url));
         }
         let final_url = response.url.clone();
-        let html = self.inline_stylesheets(&final_url, &response.text());
-        let mut images = self.fetch_images(&final_url, &html);
-        images.extend(self.fetch_scripts(&final_url, &html));
+        let mut blocked = Vec::new();
+        let body = response.text();
+        let csp = self.policy_of(response.header("content-security-policy"), &body);
+        let html = self.inline_stylesheets(&final_url, &body, &mut blocked, &csp);
+        let mut images = self.fetch_images(&final_url, &html, &mut blocked, &csp);
+        images.extend(self.fetch_scripts(&final_url, &html, &mut blocked, &csp));
         Ok(FetchedPage {
             url: final_url,
             html,
             images,
+            blocked,
+            csp,
         })
     }
 
@@ -240,6 +466,25 @@ impl NetSession {
             .into_iter()
             .map(|v| v.to_string())
             .collect();
+        // Only the headers a page can observe are kept: exposing `Set-Cookie`
+        // or the raw connection headers would be a leak, not a feature.
+        let mut observed: Vec<(String, String)> = Vec::new();
+        for name in [
+            "content-type",
+            "cache-control",
+            "etag",
+            "last-modified",
+            "access-control-allow-origin",
+            "access-control-allow-credentials",
+            "access-control-allow-methods",
+            "access-control-allow-headers",
+            "content-security-policy",
+            "location",
+        ] {
+            if let Some(value) = response.header(name) {
+                observed.push((name.to_string(), value.to_string()));
+            }
+        }
 
         let mut payload = Vec::new();
         response
@@ -273,6 +518,7 @@ impl NetSession {
                         max_age,
                         etag,
                         last_modified,
+                        headers: observed.clone(),
                     },
                 );
             }
@@ -284,6 +530,7 @@ impl NetSession {
             url: final_url,
             content_type,
             body: payload,
+            headers: observed,
         })
     }
 
@@ -311,7 +558,47 @@ impl NetSession {
     /// Real pages put almost all of their styling in external sheets; without
     /// this every custom element renders as an unstyled inline box. Bounded to
     /// `MAX_SHEETS` requests and `MAX_CSS` bytes each, and failures are skipped.
-    fn inline_stylesheets(&self, base: &str, html: &str) -> String {
+    /// The policy a document declares: the header wins over `<meta>`.
+    fn policy_of(&self, header: Option<&str>, html: &str) -> Option<Csp> {
+        if let Some(csp) = header.and_then(Csp::parse) {
+            return Some(csp);
+        }
+        let doc = naro_html::Document::parse(html);
+        for id in 0..doc.nodes.len() {
+            if doc.tag(id) != Some("meta") {
+                continue;
+            }
+            let equiv = doc
+                .attr(id, "http-equiv")
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if equiv != "content-security-policy" {
+                continue;
+            }
+            if let Some(content) = doc.attr(id, "content") {
+                if let Some(csp) = Csp::parse(content) {
+                    return Some(csp);
+                }
+            }
+        }
+        None
+    }
+
+    /// Does the policy allow `kind` from `base` at `url`?
+    fn policy_allows(csp: &Option<Csp>, kind: &str, base: &str, url: &str) -> bool {
+        match csp {
+            Some(csp) => csp.allows(kind, base, url),
+            None => true,
+        }
+    }
+
+    fn inline_stylesheets(
+        &self,
+        base: &str,
+        html: &str,
+        blocked: &mut Vec<String>,
+        csp: &Option<Csp>,
+    ) -> String {
         let doc = naro_html::Document::parse(html);
         let mut sheets: Vec<String> = Vec::new();
         let mut total = 0usize;
@@ -334,6 +621,10 @@ impl NetSession {
                 Some(u) => u,
                 None => continue,
             };
+            if !self.may_load(base, &url) || !Self::policy_allows(csp, "style", base, &url) {
+                blocked.push(url);
+                continue;
+            }
             if let Ok(css) = self.fetch_text(&url) {
                 if !css.is_empty() && total + css.len() <= MAX_CSS_TOTAL {
                     total += css.len();
@@ -372,7 +663,13 @@ impl NetSession {
 
     /// Fetch every distinct `<img src>` in document order, up to `MAX_IMAGES`.
     /// Failures are skipped: a broken image must not break the page.
-    fn fetch_images(&self, base: &str, html: &str) -> Vec<(String, Vec<u8>)> {
+    fn fetch_images(
+        &self,
+        base: &str,
+        html: &str,
+        blocked: &mut Vec<String>,
+        csp: &Option<Csp>,
+    ) -> Vec<(String, Vec<u8>)> {
         let doc = naro_html::Document::parse(html);
         let mut seen: Vec<String> = Vec::new();
         let mut out = Vec::new();
@@ -403,6 +700,10 @@ impl NetSession {
                 continue;
             }
             seen.push(url.clone());
+            if !self.may_load(base, &url) || !Self::policy_allows(csp, "img", base, &url) {
+                blocked.push(url);
+                continue;
+            }
             if let Ok(bytes) = self.fetch_bytes(&url, MAX_IMAGE_BYTES) {
                 out.push((url, bytes));
             }
@@ -429,6 +730,10 @@ impl NetSession {
                 continue;
             }
             seen.push(url.clone());
+            if !self.may_load(base, &url) || !Self::policy_allows(csp, "img", base, &url) {
+                blocked.push(url);
+                continue;
+            }
             if let Ok(bytes) = self.fetch_bytes(&url, MAX_IMAGE_BYTES) {
                 out.push((url, bytes));
             }
@@ -437,7 +742,13 @@ impl NetSession {
     }
 
     /// Fetch `<script src>` payloads so the JS runtime can execute them.
-    fn fetch_scripts(&self, base: &str, html: &str) -> Vec<(String, Vec<u8>)> {
+    fn fetch_scripts(
+        &self,
+        base: &str,
+        html: &str,
+        blocked: &mut Vec<String>,
+        csp: &Option<Csp>,
+    ) -> Vec<(String, Vec<u8>)> {
         let doc = naro_html::Document::parse(html);
         let mut out = Vec::new();
         let mut seen: Vec<String> = Vec::new();
@@ -460,11 +771,37 @@ impl NetSession {
                 continue;
             }
             seen.push(url.clone());
+            if !self.may_load(base, &url) || !Self::policy_allows(csp, "script", base, &url) {
+                blocked.push(url);
+                continue;
+            }
             if let Ok(bytes) = self.fetch_bytes(&url, MAX_SCRIPT_BYTES) {
                 out.push((url, bytes));
             }
         }
         out
+    }
+
+    /// May a document at `page` pull in a subresource at `resource`?
+    ///
+    /// Two rules, both enforced before any bytes move:
+    /// * mixed content — an `https` page never loads an `http` subresource,
+    ///   because that resource would be trivially forgeable;
+    /// * a `file://` page never reaches the network, which is what stops a
+    ///   downloaded HTML file from phoning home.
+    pub fn may_load(&self, page: &str, resource: &str) -> bool {
+        let (Some(page_origin), Some(resource_origin)) =
+            (Origin::of(page), Origin::of(resource))
+        else {
+            return true;
+        };
+        if page_origin.is_local() && !resource_origin.is_local() {
+            return false;
+        }
+        if page_origin.scheme == "https" && resource_origin.scheme == "http" {
+            return false;
+        }
+        true
     }
 
     /// Raw bytes with a hard size cap; used for images and scripts.
@@ -512,6 +849,7 @@ struct CacheEntry {
     max_age: Option<Duration>,
     etag: Option<String>,
     last_modified: Option<String>,
+    headers: Vec<(String, String)>,
 }
 
 impl CacheEntry {
@@ -529,6 +867,7 @@ impl CacheEntry {
             url,
             content_type: self.content_type.clone(),
             body: self.body.clone(),
+            headers: self.headers.clone(),
         }
     }
 }
@@ -583,6 +922,7 @@ impl HttpCache {
             max_age: entry.max_age,
             etag: entry.etag.clone(),
             last_modified: entry.last_modified.clone(),
+            headers: entry.headers.clone(),
         })
     }
 }
@@ -974,6 +1314,7 @@ mod tests {
             max_age: Some(Duration::from_secs(60)),
             etag: None,
             last_modified: None,
+            headers: Vec::new(),
         };
         cache.put("a", entry("1"));
         cache.put("b", entry("2"));
@@ -1025,6 +1366,31 @@ mod tests {
             Some(1_704_067_200)
         );
         assert_eq!(parse_http_date("lixo"), None);
+    }
+
+    #[test]
+    fn origins_compare_by_scheme_host_and_port() {
+        let a = Origin::of("https://a.com/x").unwrap();
+        assert_eq!(a.serialize(), "https://a.com");
+        assert!(a.same_origin(&Origin::of("https://a.com/y?q=1").unwrap()));
+        assert!(!a.same_origin(&Origin::of("http://a.com/").unwrap()), "scheme counts");
+        assert!(!a.same_origin(&Origin::of("https://b.com/").unwrap()));
+        assert!(!a.same_origin(&Origin::of("https://a.com:8443/").unwrap()), "port counts");
+        // `file://` is never same-origin with anything, itself included.
+        let local = Origin::of("file:///C:/x.html").unwrap();
+        assert!(local.is_local());
+        assert!(!local.same_origin(&local));
+    }
+
+    #[test]
+    fn cors_allows_star_and_exact_origin_only() {
+        let page = Origin::of("https://a.com/").unwrap();
+        assert!(page.allowed_by("*"));
+        assert!(page.allowed_by("https://a.com"));
+        assert!(!page.allowed_by("https://b.com"));
+        assert!(!page.allowed_by(""));
+        let local = Origin::of("file:///C:/x.html").unwrap();
+        assert!(!local.allowed_by("*"), "a local origin is opaque");
     }
 
     #[test]

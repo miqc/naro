@@ -10,16 +10,42 @@ Marco em execução: **v0.2** (fases A0, A1, A2, A3, A7). Plano: `local://naro-g
 | A1 | concluída | tag `phase-a1`; `228 passed / 0 failed`; `--compat` **28 pass / 0 falhas / 1 não suportado** (29 total); `29-platform.html` com 46 checks; 4 páginas de referência com `JS ERROR` idênticos ao baseline e `CONTENT_HEIGHT` idêntico; `diff reports/p8-rust.txt` = 0 | 1 | ver desvios abaixo |
 | A2 | concluída | tag `phase-a2`; `233 passed / 0 failed`; `--compat` **28 pass / 0 falhas / 2 não suportados** (30) e `--compat --serve` **29 pass / 0 falhas / 1 não suportado**; `30-net.html` com 19 checks provando fetch, XHR, cache (1 requisição ao servidor para 3 pedidos), revalidação 304, cookie de ida e volta, `HttpOnly` invisível ao script, POST e charset windows-1252; 4 páginas de referência idênticas ao baseline; `diff reports/p8-rust.txt` = 0 | 1 | ver desvios abaixo |
 | A3 | concluída | tag `phase-a3`; `233 passed / 0 failed`; `--compat` **30 pass / 0 falhas / 2 não suportados** (32) e `--compat --serve` **31 pass / 0 falhas / 1 não suportado**; `31-forms.html` (checkbox/radio/:checked/label/select/POST) e `32-selection.html` (`selection:` em duas direções); `--render ... --select` mostra 5090 px de realce nas linhas certas; 4 páginas de referência com `JS ERROR` e `CONTENT_HEIGHT` idênticos; `p8-rust` difere em 84 linhas, todas explicadas pela caixa do `<select>` | 1 | ver desvios abaixo |
-| A7 | pendente | — | 0 | depende de A2 e A3 |
-| Marco v0.2 | pendente | — | 0 | `reports/milestone-v0.2.md` |
+| A7 | concluída | tag `phase-a7`; `235 passed / 0 failed`; `--compat` 30/0/3 e `--compat --serve` **32 pass / 0 falhas / 1 não suportado**; `33-origin.html` prova `same.ok=true`, `cross.star=cors-ok`, `cross.blocked=true` (TypeError, corpo nunca entregue) e `blocked:assets/red.png` (CSP `img-src 'self'`); `file://` não alcança a rede (`local.blocked=true`); 4 páginas de referência idênticas ao baseline; `diff reports/p8-rust-a3.txt` = 0 | 1 | ver desvios abaixo |
+| Marco v0.2 | concluída | `reports/milestone-v0.2.md`; tag `milestone-v0.2` | 1 | execução aprovada encerrada |
 
 ## Próxima ação
 
-A7, passo 1: `naro_net::Origin` e a checagem de CORS em `fetch`/`XMLHttpRequest`.
+Nenhuma: o marco v0.2 está encerrado. A4, A5, A6, A8 e A9 estão especificadas e
+aguardam autorização.
 
 ## Bloqueios
 
 Nenhum.
+
+## Desvios e decisões de A7
+
+1. A política é aplicada **no ponto onde os bytes param**, não depois: `may_load`
+   (mixed content e `file://` → rede) e `Csp::allows` rodam em
+   `inline_stylesheets`/`fetch_images`/`fetch_scripts`, antes de qualquer requisição.
+   Um recurso barrado entra em `FetchedPage::blocked` e o engine o publica como
+   `recurso bloqueado pela política de origem: <url>` — é o que a check `blocked:`
+   verifica.
+2. CORS é decidido em `cors_verdict(page_origin, response)` dentro da host fn
+   `__naro_fetch`, que é o caminho de `fetch` **e** de `XMLHttpRequest`. Um bloqueio
+   devolve status 0 e o bootstrap transforma isso em `Promise.reject(TypeError)`, que
+   é a forma que uma página espera.
+3. Origem local (`file:`, `naro:`, `data:`, `about:`) é **opaca**: nunca é
+   same-origin com nada, inclusive consigo mesma, e nunca é admitida por `*`.
+4. CSP lê o header e `<meta http-equiv>` (o header vence). Nonces, hashes e
+   `'unsafe-inline'` são aceitos como fonte mas não distinguem script inline de
+   externo — limitação registrada no relatório do marco.
+5. `HttpResponse` passou a carregar os headers que uma página pode observar
+   (`content-type`, `cache-control`, `etag`, `last-modified`, `access-control-*`,
+   `content-security-policy`, `location`). `Set-Cookie` fica de fora de propósito.
+6. Defeito encontrado e corrigido no servidor de `--serve`: o corpo era convertido
+   para `String` em todas as respostas, o que corrompia PNG e derrubava
+   `04-images.html`/`17-center.html` em modo `--serve`. Só HTML passa por conversão
+   (para substituir `__PORT__`).
 
 ## Desvios e decisões de A3
 

@@ -358,6 +358,14 @@ impl Engine {
                 if self.history_index < self.history.len() {
                     self.history[self.history_index] = page.url;
                 }
+                // A subresource the origin policy refused is a page-level
+                // error, not a silent absence: report it where the other load
+                // diagnostics land.
+                for url in &page.blocked {
+                    self.js
+                        .errors
+                        .push(format!("recurso bloqueado pela política de origem: {url}"));
+                }
             }
             Err(message) => {
                 let url = self.display_url.clone();
@@ -417,6 +425,10 @@ impl Engine {
             }
         }
 
+        // A `<meta http-equiv="Content-Security-Policy">` applies to a page
+        // that arrived without a header, `file://` included. Read before the
+        // document moves into the session.
+        let csp = meta_csp(&doc);
         // Run document scripts against the live DOM before styling, so their
         // mutations are visible to the cascade and the layout.
         let scripts = collect_scripts(&doc, resources);
@@ -477,6 +489,7 @@ impl Engine {
             session.set_url(&self.display_url);
             session.set_history_index(self.history_index as i64);
             session.set_viewport(self.viewport_width, self.viewport_height);
+            session.set_csp(csp);
         }
         // Load-time script may already have asked for a toggle, a submit or a
         // history change; those have to reach the tree before it is styled,
@@ -2196,6 +2209,26 @@ pub fn bench_phases(fonts: &FontSet, html: &str, width: f32, iters: usize) -> Ph
 
 /// Normalize a user-typed address; re-exported so the UI does not depend on
 /// `naro-net` directly for this one rule.
+/// The CSP a document declares through `<meta http-equiv>`.
+fn meta_csp(doc: &Document) -> Option<naro_net::Csp> {
+    for id in 0..doc.nodes.len() {
+        if doc.tag(id) != Some("meta") {
+            continue;
+        }
+        let equiv = doc
+            .attr(id, "http-equiv")
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if equiv != "content-security-policy" {
+            continue;
+        }
+        if let Some(csp) = doc.attr(id, "content").and_then(naro_net::Csp::parse) {
+            return Some(csp);
+        }
+    }
+    None
+}
+
 /// Nearest enclosing `<form>` of `node`, if any.
 fn enclosing_form(doc: &Document, node: NodeId) -> Option<NodeId> {
     let mut current = doc.node(node).parent;

@@ -25,6 +25,8 @@
 #   choose:SEL=TEXTO -> open that <select> and pick the option with that label
 #   submit:SEL=METHOD[:BODY] -> click the control and check the navigation it
 #                     asked for (METHOD `get` or `post`, BODY a substring)
+#   blocked:TRECHO -> a subresource was refused by the origin policy (mixed
+#                     content, file:// reaching the network, or CSP)
 #   selection:x1,y1,x2,y2=TEXTO -> drag a selection and check the text it yields
 #   served[:motivo] -> the case needs a real origin (`--serve`); on file:// it
 #                     is counted as unsupported instead of failing
@@ -75,3 +77,8 @@
 # aplica um arrasto e compara o texto; `getSelection().toString()` devolve o
 # mesmo valor para o script.
 32-selection.html | log:sel.initial="" | selection:1,25,999,60=Primeira linha de texto selecionavel. Segunda linha para arrastar. | selection:40,25,300,60=ra linha de texto selecionavel. Segunda linha para arrastar. | nojsrerror
+# 33: política de origem. Só roda com `--serve`: `localhost` e `127.0.0.1` são
+# origens diferentes no mesmo port, o que dá um caso cross-origin real sem
+# depender da internet. A imagem remota é barrada por `img-src 'self'`, por
+# isso a check é `blocked:` e não `nojsrerror`.
+33-origin.html | served | log:same.ok=true | log:cross.star=cors-ok | log:cross.blocked=true | log:doc.origin=true | blocked:assets/red.png

@@ -197,6 +197,8 @@ struct Dom {
     form_ops: Vec<(usize, FormOp)>,
     /// Selected text, published by the engine after every selection change.
     selection_text: String,
+    /// Content-Security-Policy of the document, parsed once at load.
+    csp: Option<naro_net::Csp>,
     /// Index of the current entry in the engine's history vector.
     history_index: i64,
     /// Viewport the page was laid out at, for `matchMedia`.
@@ -1753,6 +1755,7 @@ impl JsSession {
             history_ops: Vec::new(),
             form_ops: Vec::new(),
             selection_text: String::new(),
+            csp: None,
             history_index: 0,
             viewport: (1000.0, 700.0),
             url: url.to_string(),
@@ -1997,6 +2000,20 @@ impl JsSession {
     /// History changes page script queued since the last drain.
     pub fn take_history_ops(&self) -> Vec<HistoryOp> {
         std::mem::take(&mut self.dom.borrow_mut().history_ops)
+    }
+
+    /// Install the document's Content-Security-Policy, if it declared one.
+    pub fn set_csp(&self, csp: Option<naro_net::Csp>) {
+        self.dom.borrow_mut().csp = csp;
+    }
+
+    /// Whether `kind` (`script`/`style`/`img`) may load from `url`.
+    pub fn csp_allows(&self, kind: &str, url: &str) -> bool {
+        let dom = self.dom.borrow();
+        match &dom.csp {
+            Some(csp) => csp.allows(kind, &dom.url, url),
+            None => true,
+        }
     }
 
     /// Publish the current selection text, for `window.getSelection()`.
@@ -3032,19 +3049,35 @@ fn register(ctx: &rquickjs::Ctx<'_>, dom: &Rc<RefCell<Dom>>) -> rquickjs::Result
                     method.to_ascii_uppercase()
                 };
                 let payload = if body.is_empty() { None } else { Some(body) };
+                let page_origin = naro_net::Origin::of(&base);
                 let result = without_deadline(|| {
                     naro_net::with_session(|net| {
                         net.request(&method, &absolute, payload.as_deref().map(str::as_bytes), &pairs)
                     })
                 });
                 match result {
-                    Ok(response) => vec![
-                        response.status.to_string(),
-                        response.status_text.clone(),
-                        response.text(),
-                        response.url.clone(),
-                        String::new(),
-                    ],
+                    Ok(response) => {
+                        // A cross-origin response is delivered only when the
+                        // server allows it. Otherwise script gets a network
+                        // error and never sees the body — the same shape a
+                        // browser produces, so a page's `catch` runs.
+                        match naro_net::cors_verdict(page_origin.as_ref(), &response) {
+                            naro_net::CorsVerdict::Blocked(reason) => vec![
+                                "0".to_string(),
+                                String::new(),
+                                String::new(),
+                                absolute,
+                                reason,
+                            ],
+                            _ => vec![
+                                response.status.to_string(),
+                                response.status_text.clone(),
+                                response.text(),
+                                response.url.clone(),
+                                String::new(),
+                            ],
+                        }
+                    }
                     Err(err) => vec![
                         "0".to_string(),
                         String::new(),
