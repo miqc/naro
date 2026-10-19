@@ -20,6 +20,12 @@
 #                              font-weight line-height width height margin-top margin-left
 #                              padding-top padding-left position opacity text-align
 #                              visibility border-radius; an unknown PROP fails the check
+#   pixel:X,Y=RRGGBB -> paint the page into a 1000x700 canvas and read that
+#                     pixel; ±2 per channel. The only check that proves what the
+#                     rasterizer produced.
+#   runfont:FAMILIA -> some text run asks for FAMILIA (any entry of its
+#                     font-family list, compared without case and quotes)
+#   boxdiff:SEL_A:SEL_B:MIN -> the two boxes differ in width by at least MIN px
 #   attr:SEL:NAME=VALUE -> the first element matching SEL has attribute NAME = VALUE
 #                          (e.g. attr:input[type=checkbox]:checked=, attr:a:href=/x)
 #   choose:SEL=TEXTO -> open that <select> and pick the option with that label
@@ -82,3 +88,25 @@
 # depender da internet. A imagem remota é barrada por `img-src 'self'`, por
 # isso a check é `blocked:` e não `nojsrerror`.
 33-origin.html | served | log:same.ok=true | log:cross.star=cors-ok | log:cross.blocked=true | log:doc.origin=true | blocked:assets/red.png
+# 34: fontes web e font-family. O @font-face aponta para um TTF OFL commitado
+# em assets/ (o crate `woff2` 0.3.0 não compila no rustc 1.99 — ver Bloqueios em
+# reports/ROADMAP-STATE.md), então o fixture é TTF. `runfont` prova que a
+# família chega ao TextRun; `boxdiff` prova que ela muda a medição sem fixar um
+# número que dependeria da fonte instalada. `served` porque `naro-net` só busca
+# fontes em origem http: em file:// o engine pré-carrega apenas imagens.
+34-fonts.html | served | log:ff=monospace | log:fw=700 | log:fx=Naro Fixture, sans-serif | computed:#mono:font-family=monospace | computed:#fix:font-family=Naro Fixture, sans-serif | runfont:monospace | runfont:naro fixture | boxdiff:#mono:#sans:1 | boxdiff:#fix:#sans:1 | nojsrerror
+# 35: efeitos visuais. Tudo em `position: absolute` com coordenadas explícitas,
+# então os `pixel:` não dependem do fluxo. O gradiente é verificado em dois
+# pontos (meio e perto da esquerda), o radial no centro e num canto fora do
+# raio, a sombra pelo spread sólido (blur 0, valor exato) e o raio percentual
+# pelos cantos: dentro da caixa quadrada e fora do círculo.
+35-visual.html | log:circ.r=50% | log:sh.bg=#ffffff | computed:#circ:border-radius=50% | pixel:100,50=#808080 | pixel:10,50=#0d0d0d | pixel:400,50=#ffffff | pixel:305,5=#000000 | pixel:105,225=#000000 | pixel:50,225=#ffffff | pixel:302,202=#ffffff | pixel:350,250=#ff0000 | nojsrerror
+# 36: transformações. Cada amostra é absoluta com coordenadas explícitas, então
+# os `pixel:` não dependem do fluxo. `#t` prova que a tinta se move e que o
+# layout NÃO se moveu (`box:` continua 100x100 em (0,0)). `#r` gira em torno do
+# centro: o centro não se move, a área girada é pintada e a original não. `#of`
+# é uma imagem 2:1 num quadrado com `object-fit: contain`, então a faixa de cima
+# é o fundo do elemento. `#lk` é um <a> block deslocado: clicável onde é pintado
+# e não clicável na posição de layout — o que exercita `hit_node` e `hit_link`
+# com a mesma matriz.
+36-transform.html | log:t.box=100x100 | log:of.fit=contain | box:#t:100x100 | computed:#of:object-fit=contain | pixel:250,50=#ff0000 | pixel:50,50=#ffffff | pixel:20,210=#0000ff | pixel:20,195=#0000ff | pixel:5,210=#ffffff | pixel:350,10=#ffffff | pixel:350,50=#c81e1e | hit:430,310=#lk | nothit:30,310=#lk | nojsrerror

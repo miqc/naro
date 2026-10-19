@@ -31,9 +31,7 @@ naro-engine = { path = "crates/naro-engine" }
 winit = "0.30.12"
 softbuffer = "0.4.8"
 ureq = { version = "2.12.1", default-features = false, features = ["native-tls", "gzip"] }
-ab_glyph = "0.2.29"
 url = "2.5.7"
-encoding_rs = "0.8"
 arboard = "3.4"
 
 [profile.release]

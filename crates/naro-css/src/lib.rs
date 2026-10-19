@@ -40,11 +40,26 @@ impl Color {
                     let b = u8::from_str_radix(&hex[2..3], 16).ok()?;
                     Some(Color::rgb(r * 17, g * 17, b * 17))
                 }
+                4 => {
+                    // `#rgba`: the fourth digit is alpha.
+                    let r = u8::from_str_radix(&hex[0..1], 16).ok()?;
+                    let g = u8::from_str_radix(&hex[1..2], 16).ok()?;
+                    let b = u8::from_str_radix(&hex[2..3], 16).ok()?;
+                    let a = u8::from_str_radix(&hex[3..4], 16).ok()?;
+                    Some(Color { r: r * 17, g: g * 17, b: b * 17, a: a * 17 })
+                }
                 6 => {
                     let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
                     let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
                     let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
                     Some(Color::rgb(r, g, b))
+                }
+                8 => {
+                    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+                    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+                    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+                    let a = u8::from_str_radix(&hex[6..8], 16).ok()?;
+                    Some(Color { r, g, b, a })
                 }
                 _ => None,
             };
@@ -58,6 +73,36 @@ impl Color {
                 return Some(Color::rgb(r, g, b));
             }
             return None;
+        }
+        if let Some(inner) = s.strip_prefix("rgba(").and_then(|v| v.strip_suffix(')')) {
+            let parts: Vec<&str> = inner.split(',').map(|p| p.trim()).collect();
+            if parts.len() == 4 {
+                let r = parts[0].parse::<u8>().ok()?;
+                let g = parts[1].parse::<u8>().ok()?;
+                let b = parts[2].parse::<u8>().ok()?;
+                // `0.5` and `.5` are both valid; anything else is invalid CSS.
+                let a = parts[3].parse::<f32>().ok()?.clamp(0.0, 1.0);
+                return Some(Color { r, g, b, a: (a * 255.0).round() as u8 });
+            }
+            return None;
+        }
+        for (prefix, has_alpha) in [("hsl(", false), ("hsla(", true)] {
+            if let Some(inner) = s.strip_prefix(prefix).and_then(|v| v.strip_suffix(')')) {
+                let parts: Vec<&str> = inner.split(',').map(|p| p.trim()).collect();
+                if parts.len() != if has_alpha { 4 } else { 3 } {
+                    return None;
+                }
+                let hue = parts[0].trim_end_matches("deg").parse::<f32>().ok()?;
+                let sat = parts[1].trim_end_matches('%').parse::<f32>().ok()? / 100.0;
+                let light = parts[2].trim_end_matches('%').parse::<f32>().ok()? / 100.0;
+                let (r, g, b) = hsl_to_rgb(hue, sat.clamp(0.0, 1.0), light.clamp(0.0, 1.0));
+                let a = if has_alpha {
+                    (parts[3].parse::<f32>().ok()?.clamp(0.0, 1.0) * 255.0).round() as u8
+                } else {
+                    255
+                };
+                return Some(Color { r, g, b, a });
+            }
         }
         let named = match s.as_str() {
             "transparent" => Color::TRANSPARENT,
@@ -89,6 +134,162 @@ impl Color {
     pub fn to_hex(&self) -> String {
         format!("#{:02x}{:02x}{:02x}", self.r, self.g, self.b)
     }
+}
+
+/// How a gradient's colour varies across the box.
+#[derive(Clone, Debug, PartialEq)]
+pub enum GradientKind {
+    /// Angle in CSS degrees: 0 = up, 90 = right, 180 = down, 270 = left.
+    Linear { angle_deg: f32 },
+    Radial { center: (f32, f32), radius: f32 },
+}
+
+/// A `linear-gradient()`/`radial-gradient()` reduced to what the rasterizer
+/// needs: a direction and stops already placed in `0..=1`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Gradient {
+    pub kind: GradientKind,
+    /// Positions in `0..=1`, ordered.
+    pub stops: Vec<(f32, Color)>,
+}
+
+/// One `box-shadow`: offsets, blur, spread, colour and `inset`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BoxShadow {
+    pub dx: f32,
+    pub dy: f32,
+    pub blur: f32,
+    pub spread: f32,
+    pub color: Color,
+    pub inset: bool,
+}
+
+/// A 2D affine transform in CSS order: `[a c e; b d f]`, column-vector
+/// convention, so `apply` is `M · p`.
+///
+/// Every method takes `self` by value: it is six `f32`, `Copy`, and passing a
+/// reference would force each caller to write `&` in a place where the type is
+/// already cheap.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Affine {
+    pub a: f32,
+    pub b: f32,
+    pub c: f32,
+    pub d: f32,
+    pub e: f32,
+    pub f: f32,
+}
+
+impl Affine {
+    pub const IDENTITY: Affine =
+        Affine { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 0.0, f: 0.0 };
+
+    /// `self · other` in the column-vector convention.
+    pub fn multiply(self, other: Affine) -> Affine {
+        Affine {
+            a: self.a * other.a + self.c * other.b,
+            b: self.b * other.a + self.d * other.b,
+            c: self.a * other.c + self.c * other.d,
+            d: self.b * other.c + self.d * other.d,
+            e: self.a * other.e + self.c * other.f + self.e,
+            f: self.b * other.e + self.d * other.f + self.f,
+        }
+    }
+
+    pub fn determinant(self) -> f32 {
+        self.a * self.d - self.b * self.c
+    }
+
+    /// Pure translation with positive scale: the only case where `device_rect`
+    /// can map two corners and stay on the fast path.
+    pub fn is_translation_scale(self) -> bool {
+        self.b == 0.0 && self.c == 0.0 && self.a > 0.0 && self.d > 0.0
+    }
+
+    /// `None` when `determinant().abs() < 1e-6` (singular matrix).
+    pub fn inverse(self) -> Option<Affine> {
+        let det = self.determinant();
+        if det.abs() < 1e-6 {
+            return None;
+        }
+        let inv = 1.0 / det;
+        Some(Affine {
+            a: self.d * inv,
+            b: -self.b * inv,
+            c: -self.c * inv,
+            d: self.a * inv,
+            e: (self.c * self.f - self.d * self.e) * inv,
+            f: (self.b * self.e - self.a * self.f) * inv,
+        })
+    }
+
+    pub fn apply(self, x: f32, y: f32) -> (f32, f32) {
+        (
+            self.a * x + self.c * y + self.e,
+            self.b * x + self.d * y + self.f,
+        )
+    }
+
+    pub fn translate(dx: f32, dy: f32) -> Affine {
+        Affine { e: dx, f: dy, ..Affine::IDENTITY }
+    }
+
+    pub fn scale(sx: f32, sy: f32) -> Affine {
+        Affine { a: sx, d: sy, ..Affine::IDENTITY }
+    }
+
+    /// Clockwise on screen, matching CSS `rotate()` with `y` pointing down.
+    pub fn rotate(deg: f32) -> Affine {
+        let (sin, cos) = deg.to_radians().sin_cos();
+        Affine { a: cos, b: sin, c: -sin, d: cos, e: 0.0, f: 0.0 }
+    }
+}
+
+impl Default for Affine {
+    fn default() -> Self {
+        Affine::IDENTITY
+    }
+}
+
+/// `object-fit` for a replaced element inside its box.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ObjectFit {
+    #[default]
+    Fill,
+    Contain,
+    Cover,
+    None,
+    ScaleDown,
+}
+
+/// Standard HSL to RGB. Hue in degrees (any range), saturation and lightness in
+/// `0..=1`.
+fn hsl_to_rgb(hue: f32, sat: f32, light: f32) -> (u8, u8, u8) {
+    let hue = hue.rem_euclid(360.0) / 360.0;
+    if sat <= 0.0 {
+        let v = (light * 255.0).round().clamp(0.0, 255.0) as u8;
+        return (v, v, v);
+    }
+    let q = if light < 0.5 {
+        light * (1.0 + sat)
+    } else {
+        light + sat - light * sat
+    };
+    let p = 2.0 * light - q;
+    let channel = |t: f32| -> u8 {
+        let t = t.rem_euclid(1.0);
+        let v = if t < 1.0 / 6.0 {
+            p + (q - p) * 6.0 * t
+        } else if t < 0.5 {
+            q
+        } else if t < 2.0 / 3.0 {
+            p + (q - p) * (2.0 / 3.0 - t) * 6.0
+        } else {
+            p
+        };
+        (v * 255.0).round().clamp(0.0, 255.0) as u8
+    };
+    (channel(hue + 1.0 / 3.0), channel(hue), channel(hue - 1.0 / 3.0))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -411,6 +612,10 @@ pub struct ComputedStyle {
     pub background: Color,
     pub font_size: f32,
     pub font_weight: u16,
+    /// `font-family` list as written; `""` means the system default.
+    pub font_family: String,
+    /// `font-style: italic`/`oblique`.
+    pub italic: bool,
     pub margin: EdgesDim,
     pub padding: EdgesDim,
     pub border: Edges,
@@ -466,8 +671,19 @@ pub struct ComputedStyle {
     pub grid_column: GridPlacement,
     pub grid_row: GridPlacement,
     pub border_radius: f32,
-    /// `box-shadow: <x> <y> <blur> <color>` (single shadow).
-    pub box_shadow: Option<(f32, f32, f32, Color)>,
+    /// `border-radius` given in `%`, resolved against the box in layout.
+    pub border_radius_percent: f32,
+    /// `box-shadow`, single shadow.
+    pub box_shadow: Option<BoxShadow>,
+    /// `linear-gradient()`/`radial-gradient()` in `background`/`background-image`.
+    pub background_gradient: Option<Gradient>,
+    /// `transform`, already composed left to right.
+    pub transform: Option<Affine>,
+    /// `transform-origin` as fractions of the box.
+    pub transform_origin: (f32, f32),
+    pub object_fit: ObjectFit,
+    /// `aspect-ratio` as `w / h`.
+    pub aspect_ratio: Option<f32>,
 }
 
 impl Default for ComputedStyle {
@@ -478,6 +694,8 @@ impl Default for ComputedStyle {
             background: Color::TRANSPARENT,
             font_size: 16.0,
             font_weight: 400,
+            font_family: String::new(),
+            italic: false,
             margin: EdgesDim::default(),
             padding: EdgesDim::default(),
             border: Edges::default(),
@@ -523,7 +741,13 @@ impl Default for ComputedStyle {
             grid_column: GridPlacement::default(),
             grid_row: GridPlacement::default(),
             border_radius: 0.0,
+            border_radius_percent: 0.0,
             box_shadow: None,
+            background_gradient: None,
+            transform: None,
+            transform_origin: (0.5, 0.5),
+            object_fit: ObjectFit::Fill,
+            aspect_ratio: None,
         }
     }
 }
@@ -582,6 +806,16 @@ pub fn computed_value(style: &ComputedStyle, prop: &str) -> Option<String> {
         "background-color" => style.background.to_hex(),
         "font-size" => format!("{}px", css_num(style.font_size)),
         "font-weight" => style.font_weight.to_string(),
+        "font-family" => style.font_family.clone(),
+        "object-fit" => match style.object_fit {
+            ObjectFit::Fill => "fill",
+            ObjectFit::Contain => "contain",
+            ObjectFit::Cover => "cover",
+            ObjectFit::None => "none",
+            ObjectFit::ScaleDown => "scale-down",
+        }
+        .to_string(),
+        "font-style" => if style.italic { "italic" } else { "normal" }.to_string(),
         "line-height" => css_num(style.line_height * style.font_size) + "px",
         "width" => style.width.as_ref().map(css_dim).unwrap_or_else(|| "auto".to_string()),
         "height" => style.height.as_ref().map(css_dim).unwrap_or_else(|| "auto".to_string()),
@@ -604,7 +838,13 @@ pub fn computed_value(style: &ComputedStyle, prop: &str) -> Option<String> {
         }
         .to_string(),
         "visibility" => if style.visible { "visible" } else { "hidden" }.to_string(),
-        "border-radius" => format!("{}px", css_num(style.border_radius)),
+        "border-radius" => {
+            if style.border_radius_percent > 0.0 {
+                format!("{}%", css_num(style.border_radius_percent))
+            } else {
+                format!("{}px", css_num(style.border_radius))
+            }
+        }
         _ => return None,
     };
     Some(value)
@@ -622,6 +862,10 @@ impl ComputedStyle {
         self.display != other.display
             || self.font_size != other.font_size
             || self.font_weight != other.font_weight
+            // A different family or slant changes every advance, so it moves
+            // boxes exactly like a size change.
+            || self.font_family != other.font_family
+            || self.italic != other.italic
             || self.margin != other.margin
             || self.padding != other.padding
             || self.border != other.border
@@ -660,6 +904,15 @@ impl ComputedStyle {
             || self.grid_gap != other.grid_gap
             || self.grid_column != other.grid_column
             || self.grid_row != other.grid_row
+            // `aspect-ratio` changes the height.
+            || self.aspect_ratio != other.aspect_ratio
+            // The paint matrix and the `object-fit` sub-rect live in the
+            // `Layout`, not in the style, so a restyle that only changes them
+            // must rebuild the layout — otherwise the page keeps painting the
+            // old matrix and no check would catch it.
+            || self.transform != other.transform
+            || self.transform_origin != other.transform_origin
+            || self.object_fit != other.object_fit
     }
 }
 
@@ -802,6 +1055,399 @@ pub struct Stylesheet {
     pub variables: std::collections::HashMap<String, String>,
     /// What the parser accepted, dropped and neutralised.
     pub report: ParseReport,
+    /// `@font-face` rules, in source order.
+    pub font_faces: Vec<FontFaceRule>,
+}
+
+/// One `@font-face` block: a family name plus the files that can supply it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FontFaceRule {
+    pub family: String,
+    /// URLs in source order; `local(...)` is discarded — NARO cannot resolve a
+    /// locally installed face by its PostScript name.
+    pub srcs: Vec<String>,
+    pub weight: u16,
+    pub italic: bool,
+}
+
+/// A `font-family` value as the computed style stores it: one entry per name,
+/// unquoted, joined with `", "`. Quotes are a CSS syntax detail the rest of the
+/// engine has no use for, and `getComputedStyle` reports the list without them.
+fn parse_family_list(value: &str) -> String {
+    value
+        .split(',')
+        .map(|f| f.trim().trim_matches(|c| c == '"' || c == '\'').trim())
+        .filter(|f| !f.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Parse a `linear-gradient()`/`radial-gradient()` value.
+///
+/// Returns `None` for anything it does not model (conic gradients, repeating
+/// variants, fewer than two stops), so the caller keeps its previous behaviour
+/// instead of painting a wrong thing.
+pub fn parse_gradient(value: &str) -> Option<Gradient> {
+    let lower = value.trim().to_ascii_lowercase();
+    let (kind, inner) = if let Some(rest) = lower.strip_prefix("linear-gradient(") {
+        let inner = rest.strip_suffix(')')?;
+        let mut parts: Vec<String> = split_top_level_commas(inner)
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect();
+        if parts.is_empty() {
+            return None;
+        }
+        // The first argument is a direction only when it is a keyword or an
+        // angle; otherwise it is already a colour stop.
+        let first = parts[0].trim().to_string();
+        let angle = if let Some(deg) = first.strip_suffix("deg") {
+            parts.remove(0);
+            deg.trim().parse::<f32>().ok()?
+        } else if first.starts_with("to ") {
+            parts.remove(0);
+            match first.as_str() {
+                "to top" => 0.0,
+                "to right" => 90.0,
+                "to bottom" => 180.0,
+                "to left" => 270.0,
+                "to top right" | "to right top" => 45.0,
+                "to bottom right" | "to right bottom" => 135.0,
+                "to bottom left" | "to left bottom" => 225.0,
+                "to top left" | "to left top" => 315.0,
+                _ => 180.0,
+            }
+        } else if first.ends_with("rad") {
+            parts.remove(0);
+            let rad = first.trim_end_matches("rad").trim().parse::<f32>().ok()?;
+            rad.to_degrees()
+        } else {
+            // No direction: CSS defaults to `to bottom`.
+            180.0
+        };
+        (GradientKind::Linear { angle_deg: angle }, parts)
+    } else if let Some(rest) = lower.strip_prefix("radial-gradient(") {
+        let inner = rest.strip_suffix(')')?;
+        let mut parts: Vec<String> = split_top_level_commas(inner)
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect();
+        if parts.is_empty() {
+            return None;
+        }
+        let mut center = (0.5f32, 0.5f32);
+        let mut radius = 0.5f32;
+        // An optional prelude: `circle`, `ellipse`, `at <pos>`, or both.
+        let first = parts[0].trim().to_string();
+        let is_color = Color::parse(&first).is_some();
+        if !is_color {
+            parts.remove(0);
+            let mut words = first.split_whitespace();
+            while let Some(word) = words.next() {
+                match word {
+                    "at" => {
+                        let mut pos = words.next().unwrap_or("center");
+                        let mut second = words.next();
+                        // `at left top` is two words; `at 20% 30%` too.
+                        if let Some(next) = second {
+                            if !next.starts_with(|c: char| c.is_ascii_digit())
+                                && next != "center"
+                                && next != "left"
+                                && next != "right"
+                                && next != "top"
+                                && next != "bottom"
+                            {
+                                second = None;
+                            }
+                        }
+                        let (x, y) = position_fractions(pos, second);
+                        center = (x, y);
+                        pos = "";
+                        let _ = pos;
+                        break;
+                    }
+                    "circle" => radius = 0.5,
+                    _ => {}
+                }
+            }
+        }
+        (GradientKind::Radial { center, radius }, parts)
+    } else {
+        return None;
+    };
+
+    let stops = parse_gradient_stops(&inner)?;
+    if stops.len() < 2 {
+        return None;
+    }
+    Some(Gradient { kind, stops })
+}
+
+/// `left`, `top`, `20%`, `30px`… as fractions of the box.
+fn position_fractions(first: &str, second: Option<&str>) -> (f32, f32) {
+    let one = |token: &str| -> Option<f32> {
+        let token = token.trim();
+        if token == "center" {
+            return Some(0.5);
+        }
+        if token == "left" || token == "top" {
+            return Some(0.0);
+        }
+        if token == "right" || token == "bottom" {
+            return Some(1.0);
+        }
+        if let Some(pct) = token.strip_suffix('%') {
+            return pct.trim().parse::<f32>().ok().map(|v| (v / 100.0).clamp(0.0, 1.0));
+        }
+        None
+    };
+    match (one(first), second.and_then(one)) {
+        (Some(a), Some(b)) => (a, b),
+        (Some(a), None) => {
+            // A single keyword is a horizontal position unless it is vertical.
+            if first == "top" || first == "bottom" {
+                (0.5, a)
+            } else {
+                (a, 0.5)
+            }
+        }
+        _ => (0.5, 0.5),
+    }
+}
+
+/// Colour stops with optional positions. Missing positions are spread evenly
+/// between the neighbours that have one, and the ends default to 0 and 1.
+fn parse_gradient_stops(parts: &[String]) -> Option<Vec<(f32, Color)>> {
+    let mut stops: Vec<(Option<f32>, Color)> = Vec::new();
+    for part in parts {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        // `<color> [<position>]`, or `<position>` alone for a two-position stop.
+        let mut color = None;
+        let mut position = None;
+        for token in part.split_whitespace() {
+            if let Some(c) = Color::parse(token) {
+                color = Some(c);
+            } else if let Some(pct) = token.strip_suffix('%') {
+                position = pct.trim().parse::<f32>().ok().map(|v| v / 100.0);
+            }
+        }
+        let color = color?;
+        stops.push((position, color));
+    }
+    if stops.len() < 2 {
+        return None;
+    }
+    // First and last default to 0 and 1 so a bare `red, blue` fills the box.
+    if stops[0].0.is_none() {
+        stops[0].0 = Some(0.0);
+    }
+    let last = stops.len() - 1;
+    if stops[last].0.is_none() {
+        stops[last].0 = Some(1.0);
+    }
+    // Interior gaps are interpolated between the nearest fixed neighbours.
+    let mut i = 0usize;
+    while i < stops.len() {
+        if stops[i].0.is_some() {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < stops.len() && stops[i].0.is_none() {
+            i += 1;
+        }
+        let before = stops[start - 1].0.unwrap_or(0.0);
+        let after = stops[i].0.unwrap_or(1.0);
+        let count = (i - start) as f32;
+        for k in 0..(i - start) {
+            let t = (k as f32 + 1.0) / (count + 1.0);
+            stops[start + k].0 = Some(before + (after - before) * t);
+        }
+    }
+    let mut out: Vec<(f32, Color)> = stops
+        .into_iter()
+        .map(|(pos, color)| (pos.unwrap_or(0.0).clamp(0.0, 1.0), color))
+        .collect();
+    out.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    Some(out)
+}
+
+/// Parse a `transform` list. Any function this does not model (`skew`,
+/// `matrix`, `perspective`) discards the whole declaration — a partial
+/// application would silently paint something the page never asked for.
+pub fn parse_transform(value: &str) -> Option<Affine> {
+    let lower = value.trim().to_ascii_lowercase();
+    if lower.is_empty() || lower == "none" {
+        return None;
+    }
+    let mut rest = lower.as_str();
+    let mut acc = Affine::IDENTITY;
+    let mut any = false;
+    while let Some(open) = rest.find('(') {
+        let name = rest[..open].trim();
+        let close = rest[open..].find(')')? + open;
+        let args: Vec<f32> = rest[open + 1..close]
+            .split(',')
+            .map(|a| a.trim())
+            .map(|a| {
+                let a = a.trim_end_matches("deg").trim_end_matches("rad");
+                a.trim_end_matches("px").trim_end_matches('%').trim().parse::<f32>()
+            })
+            .collect::<Result<Vec<f32>, _>>()
+            .ok()?;
+        let piece = match name {
+            "translate" => {
+                let (x, y) = (args.first().copied()?, args.get(1).copied().unwrap_or(0.0));
+                Affine::translate(x, y)
+            }
+            "translatex" => Affine::translate(args.first().copied()?, 0.0),
+            "translatey" => Affine::translate(0.0, args.first().copied()?),
+            "scale" => {
+                let sx = args.first().copied()?;
+                Affine::scale(sx, args.get(1).copied().unwrap_or(sx))
+            }
+            "scalex" => Affine::scale(args.first().copied()?, 1.0),
+            "scaley" => Affine::scale(1.0, args.first().copied()?),
+            "rotate" => {
+                let raw = rest[open + 1..close].trim();
+                let deg = if let Some(rad) = raw.strip_suffix("rad") {
+                    rad.trim().parse::<f32>().ok()?.to_degrees()
+                } else {
+                    args.first().copied()?
+                };
+                Affine::rotate(deg)
+            }
+            _ => return None,
+        };
+        // `transform: A B C` is `A · B · C`: the rightmost function acts on the
+        // point first.
+        acc = acc.multiply(piece);
+        any = true;
+        rest = &rest[close + 1..];
+    }
+    // Trailing text that is not another function means an unparsed tail.
+    if !any || !rest.trim().is_empty() {
+        return None;
+    }
+    Some(acc)
+}
+
+/// `transform-origin` as fractions of the box. A `<length>` cannot become a
+/// fraction here — only layout knows the box — so a px value falls back to the
+/// default and the fraction form is the single representation the painter sees.
+fn parse_transform_origin(value: &str) -> (f32, f32) {
+    let mut parts = value.split_whitespace();
+    let one = |token: &str| -> Option<f32> {
+        let token = token.trim();
+        match token {
+            "center" => Some(0.5),
+            "left" | "top" => Some(0.0),
+            "right" | "bottom" => Some(1.0),
+            _ => token
+                .strip_suffix('%')
+                .and_then(|p| p.trim().parse::<f32>().ok())
+                .map(|v| v / 100.0)
+                // `0` and `0px` are exact; any other length would need the box,
+                // which only layout has, so it falls back to the default.
+                .or_else(|| {
+                    let bare = token.strip_suffix("px").unwrap_or(token).trim();
+                    (bare.parse::<f32>().ok() == Some(0.0)).then_some(0.0)
+                }),
+        }
+    };
+    let first = parts.next().unwrap_or("center");
+    let second = parts.next();
+    match (one(first), second.and_then(one)) {
+        (Some(a), Some(b)) => (a, b),
+        (Some(a), None) => {
+            if first == "top" || first == "bottom" {
+                (0.5, a)
+            } else {
+                (a, 0.5)
+            }
+        }
+        _ => (0.5, 0.5),
+    }
+}
+
+/// `aspect-ratio: 16 / 9` (or `16/9`) as `w / h`. `auto` and anything with a
+/// zero side mean "no ratio".
+pub fn parse_aspect_ratio(value: &str) -> Option<f32> {
+    let v = value.trim();
+    if v.eq_ignore_ascii_case("auto") {
+        return None;
+    }
+    // `auto 16 / 9` and `16 / 9` both carry a usable ratio.
+    let numeric = v.trim_start_matches("auto").trim();
+    let (w, h) = match numeric.split_once('/') {
+        Some((w, h)) => (w.trim().parse::<f32>().ok()?, h.trim().parse::<f32>().ok()?),
+        None => (numeric.parse::<f32>().ok()?, 1.0),
+    };
+    if w <= 0.0 || h <= 0.0 {
+        return None;
+    }
+    Some(w / h)
+}
+
+/// A numeric weight in a `font` shorthand: `100`..=`900` in steps of 100.
+fn shorthand_weight(token: &str) -> Option<u16> {
+    let n = token.parse::<u16>().ok()?;
+    if (100..=900).contains(&n) && n % 100 == 0 {
+        Some(n)
+    } else {
+        None
+    }
+}
+
+/// The family list out of a `font` shorthand value.
+///
+/// The shorthand is `<style>? <weight>? <size>[/<line-height>] <family-list>`:
+/// the family list starts at the first token that is neither a style keyword,
+/// a weight keyword, nor a length. Everything from there on, joined back with
+/// single spaces, is the list.
+fn font_shorthand_families(value: &str) -> String {
+    let mut tokens: Vec<&str> = value.split_whitespace().collect();
+    let mut start = None;
+    for (i, token) in tokens.iter().enumerate() {
+        let lower = token.to_ascii_lowercase();
+        let is_keyword = matches!(
+            lower.as_str(),
+            "italic" | "oblique" | "normal" | "bold" | "bolder" | "lighter"
+                | "small-caps" | "ultra-condensed" | "extra-condensed" | "condensed"
+                | "semi-condensed" | "semi-expanded" | "expanded" | "extra-expanded"
+                | "ultra-expanded"
+        );
+        if is_keyword || lower.parse::<u16>().is_ok() {
+            continue;
+        }
+        // A size is the last non-keyword token before the family list, so
+        // every token from here that still parses as a length is skipped and
+        // the first one that does not begins the list.
+        let looks_like_size = lower
+            .split('/')
+            .next()
+            .map(|head| {
+                head.ends_with("px")
+                    || head.ends_with("em")
+                    || head.ends_with("rem")
+                    || head.ends_with('%')
+                    || head.ends_with("pt")
+                    || head.parse::<f32>().is_ok()
+            })
+            .unwrap_or(false);
+        if looks_like_size {
+            continue;
+        }
+        start = Some(i);
+        break;
+    }
+    match start {
+        Some(i) => parse_family_list(&tokens.split_off(i).join(" ")),
+        None => String::new(),
+    }
 }
 
 /// Remove `@media`/`@supports`/`@keyframes`/`@font-face` blocks (including
@@ -881,7 +1527,12 @@ fn parse_media_length(value: &str) -> Option<f32> {
     v.parse::<f32>().ok()
 }
 
-fn strip_at_rules(src: &str, viewport_width: f32, report: &mut ParseReport) -> String {
+fn strip_at_rules(
+    src: &str,
+    viewport_width: f32,
+    report: &mut ParseReport,
+    faces: &mut Vec<FontFaceRule>,
+) -> String {
     let mut out = String::with_capacity(src.len());
     let bytes = src.as_bytes();
     let mut i = 0usize;
@@ -906,7 +1557,7 @@ fn strip_at_rules(src: &str, viewport_width: f32, report: &mut ParseReport) -> S
                     if media_matches(query, viewport_width) {
                         let inner = &src[j + 1..end];
                         out.push(' ');
-                        out.push_str(&strip_at_rules(inner, viewport_width, report));
+                        out.push_str(&strip_at_rules(inner, viewport_width, report, faces));
                         out.push(' ');
                     }
                     i = (end + 1).min(bytes.len());
@@ -921,11 +1572,12 @@ fn strip_at_rules(src: &str, viewport_width: f32, report: &mut ParseReport) -> S
                 .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
                 .collect::<String>()
                 .to_ascii_lowercase();
-            const COUNTED: [&str; 7] = [
+            // `@font-face` is parsed rather than skipped, so it no longer
+            // counts as an unsupported at-rule.
+            const COUNTED: [&str; 6] = [
                 "supports",
                 "container",
                 "layer",
-                "font-face",
                 "keyframes",
                 "-webkit-keyframes",
                 "page",
@@ -934,6 +1586,16 @@ fn strip_at_rules(src: &str, viewport_width: f32, report: &mut ParseReport) -> S
                 report
                     .skipped
                     .push((SkipReason::UnsupportedAtRule, format!("@{name}")));
+            }
+            if name == "font-face" {
+                if let Some(end) = matching_brace(bytes, j) {
+                    if let Some(rule) = parse_font_face(&src[j + 1..end]) {
+                        faces.push(rule);
+                    }
+                    i = (end + 1).min(bytes.len());
+                    out.push(' ');
+                    continue;
+                }
             }
             // Other at-rules are skipped wholesale.
             let mut j = prelude_start;
@@ -1030,10 +1692,68 @@ impl SheetCache {
     }
 }
 
+/// Read one `@font-face` body. A rule without a family or without any `url()`
+/// is useless to the engine, so it is dropped rather than kept as a face that
+/// can never load.
+fn parse_font_face(body: &str) -> Option<FontFaceRule> {
+    let mut family = String::new();
+    let mut srcs: Vec<String> = Vec::new();
+    let mut weight = 400u16;
+    let mut italic = false;
+    for decl in parse_declarations(body) {
+        match decl.name.to_ascii_lowercase().as_str() {
+            "font-family" => family = parse_family_list(&decl.value),
+            "src" => {
+                // Every `url(...)`, in order. `local(...)` names an installed
+                // face and cannot be resolved here.
+                let mut rest = decl.value.as_str();
+                while let Some(start) = rest.find("url(") {
+                    rest = &rest[start + 4..];
+                    let Some(end) = rest.find(')') else { break };
+                    let url = rest[..end]
+                        .trim()
+                        .trim_matches(|c| c == '"' || c == '\'')
+                        .trim();
+                    if !url.is_empty() {
+                        srcs.push(url.to_string());
+                    }
+                    rest = &rest[end..];
+                }
+            }
+            "font-weight" => {
+                let lower = decl.value.trim().to_ascii_lowercase();
+                weight = match lower.as_str() {
+                    "normal" => 400,
+                    "bold" => 700,
+                    _ => lower.parse::<u16>().unwrap_or(400),
+                };
+            }
+            "font-style" => {
+                italic = matches!(lower_style(&decl.value).as_str(), "italic" | "oblique");
+            }
+            _ => {}
+        }
+    }
+    if family.is_empty() || srcs.is_empty() {
+        return None;
+    }
+    Some(FontFaceRule { family, srcs, weight, italic })
+}
+
+fn lower_style(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
 /// Parse with a viewport width, so `@media` rules can be evaluated.
 pub fn parse_stylesheet_for(src: &str, viewport_width: f32) -> Stylesheet {
     let mut report = ParseReport::default();
-    let src = strip_at_rules(&strip_comments(src), viewport_width, &mut report);
+    let mut font_faces = Vec::new();
+    let src = strip_at_rules(
+        &strip_comments(src),
+        viewport_width,
+        &mut report,
+        &mut font_faces,
+    );
     let mut rules = Vec::new();
     let mut variables: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     let mut rest = src.as_str();
@@ -1058,7 +1778,7 @@ pub fn parse_stylesheet_for(src: &str, viewport_width: f32) -> Stylesheet {
             rules.push(Rule { selector, declarations: declarations.clone() });
         }
     }
-    Stylesheet { rules, variables, report }
+    Stylesheet { rules, variables, report, font_faces }
 }
 
 fn strip_comments(src: &str) -> String {
@@ -2147,6 +2867,8 @@ pub fn compute_styles_scoped(
             inherited.color = parent_style.color;
             inherited.font_size = parent_style.font_size;
             inherited.font_weight = parent_style.font_weight;
+            inherited.font_family = parent_style.font_family.clone();
+            inherited.italic = parent_style.italic;
             inherited.text_align = parent_style.text_align;
             inherited.line_height = parent_style.line_height;
             inherited.underline = parent_style.underline;
@@ -2161,6 +2883,8 @@ pub fn compute_styles_scoped(
         style.color = parent_style.color;
         style.font_size = parent_style.font_size;
         style.font_weight = parent_style.font_weight;
+        style.font_family = parent_style.font_family.clone();
+        style.italic = parent_style.italic;
         style.text_align = parent_style.text_align;
         style.line_height = parent_style.line_height;
         // `text-decoration` is not inherited per spec, but it propagates to
@@ -2925,10 +3649,18 @@ fn apply_declaration(
             }
         }
         "background" => {
-            for token in value.split_whitespace() {
-                if let Some(c) = Color::parse(token) {
-                    style.background = c;
-                    break;
+            // A gradient wins over the colour: `background: linear-gradient(...)
+            // #fff` paints the gradient, and the colour is only the fallback
+            // behind a transparent stop.
+            if let Some(gradient) = parse_gradient(value) {
+                style.background_gradient = Some(gradient);
+            } else {
+                style.background_gradient = None;
+                for token in value.split_whitespace() {
+                    if let Some(c) = Color::parse(token) {
+                        style.background = c;
+                        break;
+                    }
                 }
             }
         }
@@ -2957,6 +3689,33 @@ fn apply_declaration(
                 "lighter" => 300,
                 _ => value.parse::<u16>().unwrap_or(style.font_weight),
             };
+        }
+        "font-family" => {
+            style.font_family = parse_family_list(value);
+        }
+        "font-style" => {
+            style.italic = matches!(
+                value.to_ascii_lowercase().as_str(),
+                "italic" | "oblique"
+            );
+        }
+        "transform" => {
+            style.transform = parse_transform(value);
+        }
+        "transform-origin" => {
+            style.transform_origin = parse_transform_origin(value);
+        }
+        "object-fit" => {
+            style.object_fit = match value.to_ascii_lowercase().as_str() {
+                "contain" => ObjectFit::Contain,
+                "cover" => ObjectFit::Cover,
+                "none" => ObjectFit::None,
+                "scale-down" => ObjectFit::ScaleDown,
+                _ => ObjectFit::Fill,
+            };
+        }
+        "aspect-ratio" => {
+            style.aspect_ratio = parse_aspect_ratio(value);
         }
         "margin" => {
             let parts: Vec<String> = split_top_level(value);
@@ -3045,31 +3804,53 @@ fn apply_declaration(
             }
         }
         "border-radius" => {
-            if let Some(v) = parse_length(value.split('/').next().unwrap_or(value), ctx) {
+            let first = value.split('/').next().unwrap_or(value).trim();
+            // `50%` cannot be resolved here: the percentage is of the box, and
+            // only layout knows the box. The fraction is kept and turned into
+            // pixels in `Flow::block`.
+            if let Some(pct) = first.strip_suffix('%') {
+                if let Ok(v) = pct.trim().parse::<f32>() {
+                    style.border_radius_percent = v.max(0.0);
+                    style.border_radius = 0.0;
+                }
+            } else if let Some(v) = parse_length(first, ctx) {
                 style.border_radius = v.max(0.0);
+                style.border_radius_percent = 0.0;
             }
         }
         "box-shadow" => {
+            style.box_shadow = None;
             if !value.eq_ignore_ascii_case("none") {
+                // Only the first shadow of a list: `a, b` is rare and a second
+                // shadow is not worth a second mask per box. Split at top level
+                // so the commas inside `rgba()` do not cut the value.
+                let first = split_top_level_commas(value)
+                    .first()
+                    .copied()
+                    .unwrap_or(value);
                 let mut nums: Vec<f32> = Vec::new();
-                let mut color = Color::rgb(0, 0, 0);
-                let mut color_alpha = 60u8;
-                for token in value.split_whitespace() {
-                    if let Some(c) = Color::parse(token) {
-                        color = c;
+                let mut color: Option<Color> = None;
+                let mut inset = false;
+                for token in first.split_whitespace() {
+                    if token.eq_ignore_ascii_case("inset") {
+                        inset = true;
+                    } else if let Some(c) = Color::parse(token) {
+                        color = Some(c);
                     } else if let Some(v) = parse_length(token, ctx) {
                         nums.push(v);
                     }
                 }
                 if nums.len() >= 2 {
-                    let blur = nums.get(2).copied().unwrap_or(0.0);
-                    let (x, y) = (nums[0], nums[1]);
-                    // `rgba()` is not parsed; treat a missing color as a soft grey.
-                    if color == Color::rgb(0, 0, 0) {
-                        color = Color { r: 0, g: 0, b: 0, a: color_alpha };
-                        color_alpha = 60;
-                    }
-                    style.box_shadow = Some((x, y, blur, color));
+                    style.box_shadow = Some(BoxShadow {
+                        dx: nums[0],
+                        dy: nums[1],
+                        blur: nums.get(2).copied().unwrap_or(0.0).max(0.0),
+                        spread: nums.get(3).copied().unwrap_or(0.0),
+                        // No colour means a soft black, which is what a page
+                        // that omits it expects to see.
+                        color: color.unwrap_or(Color { r: 0, g: 0, b: 0, a: 60 }),
+                        inset,
+                    });
                 }
             }
         }
@@ -3239,6 +4020,11 @@ fn apply_declaration(
             });
         }
         "background-image" => {
+            if let Some(gradient) = parse_gradient(value) {
+                style.background_gradient = Some(gradient);
+                return;
+            }
+            style.background_gradient = None;
             if let Some(start) = value.find("url(") {
                 let rest = &value[start + 4..];
                 if let Some(end) = rest.find(')') {
@@ -3386,13 +4172,33 @@ fn apply_declaration(
                     if let Ok(n) = lh.parse::<f32>() {
                         style.line_height = n.max(0.5);
                     }
+                } else if token.eq_ignore_ascii_case("bold") {
+                    style.font_weight = 700;
+                } else if let Some(weight) = shorthand_weight(token) {
+                    // A bare `700` in the shorthand is a weight, not a size:
+                    // `font: 700 24px Arial` would otherwise measure 700px.
+                    style.font_weight = weight;
                 } else if let Some(px) = parse_length(token, ctx) {
                     if px >= 8.0 {
                         style.font_size = px;
                     }
-                } else if token.eq_ignore_ascii_case("bold") {
-                    style.font_weight = 700;
                 }
+            }
+            // The rest of the shorthand — everything after the size, the
+            // optional `/line-height`, the weight and the style — is the
+            // family list. `16px/1.4 Arial, sans-serif` must yield
+            // `font_family == "Arial, sans-serif"`.
+            let rest = font_shorthand_families(value);
+            if !rest.is_empty() {
+                style.font_family = rest;
+            }
+            let lower = value.to_ascii_lowercase();
+            let words: Vec<&str> = lower.split_whitespace().collect();
+            if words.iter().any(|w| *w == "italic" || *w == "oblique") {
+                style.italic = true;
+            } else if words.iter().any(|w| *w == "normal") {
+                // `font: normal 16px Arial` resets the slant.
+                style.italic = false;
             }
         }
         "text-align" => {
@@ -4500,6 +5306,70 @@ mod tests {
     }
 
     #[test]
+    fn font_face_collects_urls_and_skips_local() {
+        let sheet = parse_stylesheet(
+            r#"@font-face {
+                font-family: "Naro Fixture";
+                src: local("Fixture"), url(a.woff2) format("woff2"), url("b.ttf") format("truetype");
+                font-weight: 700;
+                font-style: italic;
+            }
+            p { color: #000000 }"#,
+        );
+        assert_eq!(sheet.font_faces.len(), 1);
+        let face = &sheet.font_faces[0];
+        assert_eq!(face.family, "Naro Fixture");
+        assert_eq!(face.srcs, vec!["a.woff2".to_string(), "b.ttf".to_string()]);
+        assert_eq!(face.weight, 700);
+        assert!(face.italic);
+        // The at-rule no longer shows up as unsupported.
+        assert!(!sheet
+            .report
+            .skipped
+            .iter()
+            .any(|(reason, detail)| *reason == SkipReason::UnsupportedAtRule
+                && detail == "@font-face"));
+    }
+
+    #[test]
+    fn font_face_without_family_or_src_is_dropped() {
+        assert!(parse_stylesheet("@font-face { src: url(a.woff2) }").font_faces.is_empty());
+        assert!(parse_stylesheet("@font-face { font-family: X }").font_faces.is_empty());
+    }
+
+    #[test]
+    fn font_family_is_inherited_and_normalized() {
+        let style = style_of(
+            r#"<div><p>t</p></div>"#,
+            r#"div { font-family: "Arial", 'Helvetica Neue' , sans-serif }"#,
+            "p",
+        );
+        assert_eq!(style.font_family, "Arial, Helvetica Neue, sans-serif");
+    }
+
+    #[test]
+    fn font_shorthand_carries_size_line_height_and_family() {
+        let style = style_of("<p>t</p>", "p { font: italic 700 16px/1.4 Arial, sans-serif }", "p");
+        assert_eq!(style.font_size, 16.0);
+        assert_eq!(style.line_height, 1.4);
+        assert_eq!(style.font_weight, 700);
+        assert!(style.italic);
+        assert_eq!(style.font_family, "Arial, sans-serif");
+    }
+
+    #[test]
+    fn font_style_and_computed_values() {
+        let style = style_of("<p>t</p>", "p { font-style: oblique; font-family: monospace }", "p");
+        assert!(style.italic);
+        assert_eq!(computed_value(&style, "font-style").as_deref(), Some("italic"));
+        assert_eq!(computed_value(&style, "font-family").as_deref(), Some("monospace"));
+        // A family change must force a relayout: it changes every advance.
+        let mut other = style.clone();
+        other.font_family = "sans-serif".to_string();
+        assert!(style.geometry_differs(&other));
+    }
+
+    #[test]
     fn selector_parsing_survives_multibyte_names() {
         // The parser works on byte offsets; a name character above U+007F is
         // accepted by `is_name_char`, so slicing must stay on boundaries.
@@ -4507,5 +5377,220 @@ mod tests {
         assert_eq!(sheet.rules.len(), 2);
         assert_eq!(sheet.rules[0].selector.compounds[0].classes, vec!["ação".to_string()]);
         assert_eq!(sheet.rules[1].selector.compounds[0].attrs[0].value, "ção");
+    }
+
+    #[test]
+    fn color_parses_alpha_forms() {
+        assert_eq!(Color::parse("rgba(0, 0, 0, 0.5)").unwrap().a, 128);
+        assert_eq!(Color::parse("rgba(0,0,0,.5)").unwrap().a, 128);
+        assert_eq!(Color::parse("#ff000080").unwrap().a, 128);
+        assert_eq!(Color::parse("#f008").unwrap().a, 136);
+        // `to_hex` still reports the RGB channels only.
+        assert_eq!(Color::parse("#ff000080").unwrap().to_hex(), "#ff0000");
+    }
+
+    #[test]
+    fn color_parses_hsl() {
+        let red = Color::parse("hsl(0, 100%, 50%)").unwrap();
+        assert_eq!((red.r, red.g, red.b), (255, 0, 0));
+        let green = Color::parse("hsl(120deg, 100%, 50%)").unwrap();
+        assert_eq!((green.r, green.g, green.b), (0, 255, 0));
+        let gray = Color::parse("hsl(0, 0%, 50%)").unwrap();
+        assert_eq!((gray.r, gray.g, gray.b), (128, 128, 128));
+        assert_eq!(Color::parse("hsla(240, 100%, 50%, 0.5)").unwrap().a, 128);
+    }
+
+    #[test]
+    fn linear_gradient_parses_direction_and_stops() {
+        let g = parse_gradient("linear-gradient(to right, #000000, #ffffff)").expect("gradient");
+        assert_eq!(g.kind, GradientKind::Linear { angle_deg: 90.0 });
+        assert_eq!(g.stops.len(), 2);
+        assert_eq!(g.stops[0].0, 0.0);
+        assert_eq!(g.stops[1].0, 1.0);
+        // A bare angle, and the CSS default direction.
+        assert_eq!(
+            parse_gradient("linear-gradient(45deg, red, blue)").unwrap().kind,
+            GradientKind::Linear { angle_deg: 45.0 }
+        );
+        assert_eq!(
+            parse_gradient("linear-gradient(red, blue)").unwrap().kind,
+            GradientKind::Linear { angle_deg: 180.0 }
+        );
+        // Fewer than two stops is not a gradient.
+        assert!(parse_gradient("linear-gradient(red)").is_none());
+        assert!(parse_gradient("#ffffff").is_none());
+    }
+
+    #[test]
+    fn linear_gradient_stops_interpolate_and_respect_positions() {
+        let g = parse_gradient("linear-gradient(red 10%, blue 60%, lime)").unwrap();
+        assert_eq!(g.stops.len(), 3);
+        assert!((g.stops[0].0 - 0.1).abs() < 1e-6);
+        assert!((g.stops[1].0 - 0.6).abs() < 1e-6);
+        assert!((g.stops[2].0 - 1.0).abs() < 1e-6);
+        // Positions are sorted even when the source is not.
+        let sorted = parse_gradient("linear-gradient(red 80%, blue 20%)").unwrap();
+        assert!(sorted.stops[0].0 <= sorted.stops[1].0);
+    }
+
+    #[test]
+    fn radial_gradient_parses_centre() {
+        let g = parse_gradient("radial-gradient(circle at 50% 50%, #ffffff, #000000)").unwrap();
+        match g.kind {
+            GradientKind::Radial { center, radius } => {
+                assert!((center.0 - 0.5).abs() < 1e-6);
+                assert!((center.1 - 0.5).abs() < 1e-6);
+                assert!((radius - 0.5).abs() < 1e-6);
+            }
+            other => panic!("esperava radial, veio {other:?}"),
+        }
+        let corner = parse_gradient("radial-gradient(at left top, red, blue)").unwrap();
+        assert_eq!(
+            corner.kind,
+            GradientKind::Radial { center: (0.0, 0.0), radius: 0.5 }
+        );
+        // A prelude that is already a colour must not be eaten.
+        let plain = parse_gradient("radial-gradient(red, blue)").unwrap();
+        assert_eq!(plain.stops.len(), 2);
+    }
+
+    #[test]
+    fn box_shadow_parses_spread_inset_and_alpha() {
+        let style = style_of(
+            "<p>t</p>",
+            "p { box-shadow: 0 2px 4px 2px rgba(0,0,0,.3) inset }",
+            "p",
+        );
+        let shadow = style.box_shadow.expect("sombra");
+        assert_eq!((shadow.dx, shadow.dy, shadow.blur, shadow.spread), (0.0, 2.0, 4.0, 2.0));
+        assert!(shadow.inset);
+        assert_eq!(shadow.color.a, 77);
+        // No colour means a soft black, the historical default.
+        let plain = style_of("<p>t</p>", "p { box-shadow: 0 1px 0 }", "p");
+        assert_eq!(plain.box_shadow.unwrap().color.a, 60);
+        assert!(style_of("<p>t</p>", "p { box-shadow: none }", "p").box_shadow.is_none());
+    }
+
+    #[test]
+    fn border_radius_percent_is_kept_symbolic() {
+        let style = style_of("<p>t</p>", "p { border-radius: 50% }", "p");
+        assert_eq!(style.border_radius_percent, 50.0);
+        assert_eq!(style.border_radius, 0.0);
+        assert_eq!(computed_value(&style, "border-radius").as_deref(), Some("50%"));
+        let px = style_of("<p>t</p>", "p { border-radius: 4px }", "p");
+        assert_eq!(computed_value(&px, "border-radius").as_deref(), Some("4px"));
+    }
+
+    #[test]
+    fn gradient_reaches_the_computed_style() {
+        let style = style_of(
+            "<p>t</p>",
+            "p { background: linear-gradient(to right, #000000, #ffffff) }",
+            "p",
+        );
+        assert!(style.background_gradient.is_some());
+        // `background-image` takes the same path.
+        let via_image = style_of(
+            "<p>t</p>",
+            "p { background-image: linear-gradient(red, blue) }",
+            "p",
+        );
+        assert!(via_image.background_gradient.is_some());
+    }
+
+    fn transform_of(css: &str) -> Affine {
+        style_of("<p>t</p>", css, "p").transform.expect("transform")
+    }
+
+    #[test]
+    fn transform_composes_left_to_right() {
+        // `translate(10px, 0) rotate(90deg)` applied to (1, 0) is (10, 1): the
+        // rotation acts first because it is on the right. Swapping `multiply`
+        // gives (0, 11) and fails here.
+        let m = transform_of("p { transform: translate(10px, 0) rotate(90deg) }");
+        let (x, y) = m.apply(1.0, 0.0);
+        assert!((x - 10.0).abs() < 1e-4, "x = {x}");
+        assert!((y - 1.0).abs() < 1e-4, "y = {y}");
+
+        // The scale also scales the translation, because the translation is on
+        // the right of the scale.
+        let m = transform_of("p { transform: scale(2) translate(5px, 0) }");
+        let (x, y) = m.apply(1.0, 0.0);
+        assert!((x - 12.0).abs() < 1e-4, "x = {x}");
+        assert!(y.abs() < 1e-4);
+    }
+
+    #[test]
+    fn transform_origin_shifts_the_local_matrix() {
+        // A 100x100 box rotated about its top-left corner keeps (0,0) fixed;
+        // about its centre, (0,0) maps to (50, -50).
+        let m = transform_of("p { transform: rotate(90deg); transform-origin: left top }");
+        let (x, y) = m.apply(0.0, 0.0);
+        assert!(x.abs() < 1e-4 && y.abs() < 1e-4, "origem left top: {x},{y}");
+
+        let style = style_of(
+            "<p>t</p>",
+            "p { transform: rotate(90deg); transform-origin: center }",
+            "p",
+        );
+        assert_eq!(style.transform_origin, (0.5, 0.5));
+        let m = style.transform.unwrap();
+        // Conjugating by the origin is a layout step; the origin itself is
+        // what differs, and `Flow::block` applies it.
+        assert_ne!(
+            style_of("<p>t</p>", "p { transform-origin: left top }", "p").transform_origin,
+            style.transform_origin
+        );
+        let (x, y) = m.apply(0.0, 0.0);
+        assert!(x.abs() < 1e-4 && y.abs() < 1e-4);
+    }
+
+    #[test]
+    fn mirrored_and_singular_transforms() {
+        let m = transform_of("p { transform: scale(-1, 1) }");
+        assert!(m.inverse().is_some());
+        assert!(!m.is_translation_scale());
+        let (x, _) = m.apply(1.0, 0.0);
+        assert!((x + 1.0).abs() < 1e-4);
+
+        let zero = transform_of("p { transform: scale(0) }");
+        assert!(zero.inverse().is_none());
+    }
+
+    #[test]
+    fn unknown_transform_functions_discard_the_declaration() {
+        assert_eq!(parse_transform("skew(10deg)"), None);
+        assert_eq!(parse_transform("matrix(1,0,0,1,0,0)"), None);
+        assert_eq!(parse_transform("perspective(100px)"), None);
+        // `none` clears the transform instead of keeping the previous one.
+        let style = style_of(
+            "<p>t</p>",
+            "p { transform: rotate(10deg) } p { transform: none }",
+            "p",
+        );
+        assert!(style.transform.is_none());
+    }
+
+    #[test]
+    fn object_fit_and_aspect_ratio_parse() {
+        let style = style_of(
+            "<p>t</p>",
+            "p { object-fit: contain; aspect-ratio: 16 / 9 }",
+            "p",
+        );
+        assert_eq!(style.object_fit, ObjectFit::Contain);
+        assert!((style.aspect_ratio.unwrap() - 16.0 / 9.0).abs() < 1e-5);
+        assert_eq!(computed_value(&style, "object-fit").as_deref(), Some("contain"));
+        assert_eq!(parse_aspect_ratio("auto"), None);
+        assert!((parse_aspect_ratio("4/2").unwrap() - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn transform_change_forces_a_relayout() {
+        // The paint matrix lives in the `Layout`, so a restyle that only
+        // changes `transform` must rebuild the boxes.
+        let a = style_of("<p>t</p>", "p { transform: translate(10px, 0) }", "p");
+        let b = style_of("<p>t</p>", "p { transform: translate(20px, 0) }", "p");
+        assert!(a.geometry_differs(&b));
     }
 }

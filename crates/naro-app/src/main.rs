@@ -807,7 +807,7 @@ impl App {
         {
             let fonts = &self.engine.fonts;
             for (_, label, _) in &options {
-                let w = fonts.measure(label, 14.0, false) + 16.0;
+                let w = fonts.measure(label, 14.0, naro_text::FontFace::default()) + 16.0;
                 width = width.max(w);
             }
         }
@@ -863,14 +863,14 @@ impl App {
             if Some(node) == selected {
                 canvas.fill_rect(row.x, row.y, row.w, row.h, Color::rgb(0xe8, 0xef, 0xfb));
             }
-            let bold = Some(node) == selected;
+            let weight = if Some(node) == selected { 700 } else { 400 };
             canvas.draw_text(
                 row.x + 6.0,
                 row.y + row.h - 5.0,
                 &label,
                 14.0,
                 Color::rgb(0x1a, 0x1a, 0x1a),
-                bold,
+                naro_text::FontFace::new("", weight, false),
                 &mut self.engine.fonts,
             );
         }
@@ -915,7 +915,15 @@ impl App {
                 w: (rect.w - 38.0).max(0.0),
                 h: rect.h,
             });
-            canvas.draw_text(text_x, rect.y + 19.0, title, 12.5, color, false, fonts);
+            canvas.draw_text(
+                text_x,
+                rect.y + 19.0,
+                title,
+                12.5,
+                color,
+                naro_text::FontFace::default(),
+                fonts,
+            );
             canvas.reset_clip();
 
             // Close button: always on the active tab, on hover otherwise.
@@ -1032,11 +1040,19 @@ impl App {
         })
         .map(|(icon, rect)| (icon.label(), rect));
         if let Some((label, anchor)) = hint {
-            let tw = canvas.text_width(label, 11.0, false, fonts);
+            let tw = canvas.text_width(label, 11.0, naro_text::FontFace::default(), fonts);
             let bx = (anchor.x + anchor.w / 2.0 - tw / 2.0 - 6.0).max(2.0);
             let by = anchor.y + anchor.h + 4.0;
             canvas.fill_round_rect(bx, by, tw + 12.0, 18.0, 4.0, C_TOOLTIP_BG);
-            canvas.draw_text(bx + 6.0, by + 13.0, label, 11.0, Color::WHITE, false, fonts);
+            canvas.draw_text(
+                bx + 6.0,
+                by + 13.0,
+                label,
+                11.0,
+                Color::WHITE,
+                naro_text::FontFace::default(),
+                fonts,
+            );
         }
 
         let addr = &layout.addr;
@@ -1066,11 +1082,20 @@ impl App {
         } else {
             (self.chrome.addr.clone(), C_TEXT)
         };
-        canvas.draw_text(text_x, baseline, &shown, 14.0, color, false, fonts);
+        canvas.draw_text(
+            text_x,
+            baseline,
+            &shown,
+            14.0,
+            color,
+            naro_text::FontFace::default(),
+            fonts,
+        );
 
         if self.chrome.focused {
             let prefix = &self.chrome.addr[..self.chrome.cursor.min(self.chrome.addr.len())];
-            let caret_x = text_x + canvas.text_width(prefix, 14.0, false, fonts);
+            let caret_x =
+                text_x + canvas.text_width(prefix, 14.0, naro_text::FontFace::default(), fonts);
             canvas.fill_rect(caret_x, addr.y + 7.0, 1.0, addr.h - 14.0, C_ACCENT);
         }
         canvas.reset_clip();
@@ -1085,18 +1110,18 @@ impl App {
             &status_line,
             12.0,
             C_STATUS_TEXT,
-            false,
+            naro_text::FontFace::default(),
             fonts,
         );
         let brand = "NARO 0.1";
-        let bw = canvas.text_width(brand, 12.0, false, fonts);
+        let bw = canvas.text_width(brand, 12.0, naro_text::FontFace::default(), fonts);
         canvas.draw_text(
             status.x + status.w - bw - 10.0,
             status.y + 15.0,
             brand,
             12.0,
             C_MUTED,
-            false,
+            naro_text::FontFace::default(),
             fonts,
         );
         canvas.reset_clip();
@@ -2511,6 +2536,157 @@ fn run_compat(dir: &str, serve: bool, verbose: bool) -> i32 {
                         notes.push(format!("cor ausente: #{want}"));
                     }
                 }
+                "runfont" => {
+                    // runfont:<family> — some text run asks for this family.
+                    // The run keeps the whole `font-family` list, so the check
+                    // passes when any entry matches, compared without case and
+                    // without the quotes the cascade strips.
+                    let want = value.trim().trim_matches(|c| c == '"' || c == '\'').to_lowercase();
+                    let got = engine
+                        .layout
+                        .as_ref()
+                        .map(|l| {
+                            l.text_runs.iter().any(|r| {
+                                r.family.split(',').any(|f| {
+                                    f.trim()
+                                        .trim_matches(|c| c == '"' || c == '\'')
+                                        .to_lowercase()
+                                        == want
+                                })
+                            })
+                        })
+                        .unwrap_or(false);
+                    if !got {
+                        ok = false;
+                        notes.push(format!("família ausente: {want:?}"));
+                    }
+                }
+                "hit" | "nothit" => {
+                    // hit:<x>,<y>=<selector> — `engine.hit_node` resolves to a
+                    // node matching the selector. `nothit` is the negation and
+                    // passes when there is no node at all. This is what proves
+                    // transformed hit-testing end to end, through the runner.
+                    let Some((coords, selector)) = value.split_once('=') else {
+                        ok = false;
+                        notes.push(format!("{key} malformado: {value:?}"));
+                        continue;
+                    };
+                    let nums: Vec<f32> = coords
+                        .split(',')
+                        .filter_map(|v| v.trim().parse::<f32>().ok())
+                        .collect();
+                    if nums.len() != 2 {
+                        ok = false;
+                        notes.push(format!("{key} sem duas coordenadas: {coords:?}"));
+                        continue;
+                    }
+                    let hit = engine.hit_node(nums[0], nums[1]);
+                    let matches = match (&engine.doc, hit) {
+                        (Some(doc), Some(node)) => {
+                            let want = naro_css::parse_selector_list_text(selector);
+                            want.iter().any(|sel| sel.matches(doc, node))
+                        }
+                        _ => false,
+                    };
+                    if key == "hit" && !matches {
+                        ok = false;
+                        notes.push(format!(
+                            "hit {coords} não casa com {selector:?} (nó {hit:?})"
+                        ));
+                    } else if key == "nothit" && matches {
+                        ok = false;
+                        notes.push(format!("hit inesperado {coords} em {selector:?}"));
+                    }
+                }
+                "pixel" => {
+                    // pixel:<x>,<y>=RRGGBB — paint the page into a 1000x700
+                    // canvas and read that pixel. The only check that proves
+                    // what the rasterizer actually produced, not what the
+                    // layout intended.
+                    let Some((coords, want)) = value.split_once('=') else {
+                        ok = false;
+                        notes.push(format!("pixel malformado: {value:?}"));
+                        continue;
+                    };
+                    let nums: Vec<f32> = coords
+                        .split(',')
+                        .filter_map(|v| v.trim().parse::<f32>().ok())
+                        .collect();
+                    if nums.len() != 2 {
+                        ok = false;
+                        notes.push(format!("pixel sem duas coordenadas: {coords:?}"));
+                        continue;
+                    }
+                    let want = want.trim().trim_start_matches('#').to_ascii_lowercase();
+                    let want_value = u32::from_str_radix(&want, 16).unwrap_or(0);
+                    let (px, py) = (nums[0].round() as i32, nums[1].round() as i32);
+                    if px < 0 || py < 0 || px >= 1000 || py >= 700 {
+                        ok = false;
+                        notes.push(format!("pixel fora da tela: {px},{py}"));
+                        continue;
+                    }
+                    let mut pixels = vec![0u32; 1000 * 700];
+                    let mut canvas = Canvas::new(&mut pixels, 1000, 700, 1.0);
+                    canvas.clear(Color::WHITE);
+                    engine.paint_page(
+                        &mut canvas,
+                        Rect { x: 0.0, y: 0.0, w: 1000.0, h: 700.0 },
+                    );
+                    let got = canvas.pixels[py as usize * 1000 + px as usize] & 0x00FF_FFFF;
+                    let close = |shift: u32| -> bool {
+                        let a = ((got >> shift) & 0xFF) as i32;
+                        let b = ((want_value >> shift) & 0xFF) as i32;
+                        (a - b).abs() <= 2
+                    };
+                    if !(close(16) && close(8) && close(0)) {
+                        ok = false;
+                        notes.push(format!(
+                            "pixel {px},{py} #{got:06x} != #{want_value:06x}"
+                        ));
+                    }
+                }
+                "boxdiff" => {
+                    // boxdiff:<selA>:<selB>:<min px> — the two boxes differ in
+                    // width by at least `min`. Proves that a family change
+                    // reaches measurement without pinning a number that
+                    // depends on the fonts installed.
+                    let Some((pair, want)) = value.rsplit_once(':') else {
+                        ok = false;
+                        notes.push(format!("boxdiff malformado: {value:?}"));
+                        continue;
+                    };
+                    let Some((sel_a, sel_b)) = pair.rsplit_once(':') else {
+                        ok = false;
+                        notes.push(format!("boxdiff sem dois seletores: {value:?}"));
+                        continue;
+                    };
+                    let min: f32 = want.trim().parse().unwrap_or(0.0);
+                    let width_of = |selector: &str| -> Option<f32> {
+                        let doc = engine.doc.as_ref()?;
+                        let node = naro_css::query_selector(doc, selector)?;
+                        engine
+                            .layout
+                            .as_ref()?
+                            .blocks
+                            .iter()
+                            .find(|b| b.node == node)
+                            .map(|b| b.rect.w)
+                    };
+                    match (width_of(sel_a), width_of(sel_b)) {
+                        (Some(a), Some(b)) => {
+                            if (a - b).abs() < min {
+                                ok = false;
+                                notes.push(format!(
+                                    "larguras de {sel_a:?} ({a:.1}) e {sel_b:?} ({b:.1}) diferem menos que {min}"
+                                ));
+                            }
+                        }
+                        _ => {
+                            ok = false;
+                            notes.push(format!("caixa ausente em boxdiff: {value:?}"));
+                        }
+                    }
+                }
                 "blockbg" => {
                     // blockbg:<tag>:RRGGBB — some block of that tag has this
                     // background, which is a paint-only property.
@@ -2828,6 +3004,43 @@ fn main() {
             peak_bytes() as f64 / 1024.0,
             LIVE.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1024.0
         );
+        return;
+    }
+
+    if args.first().map(|s| s.as_str()) == Some("--bench-shadow") {
+        // Median cost of one `fill_shadow` per (blur, spread) pair. The clamp
+        // is active, so the last pair reports an effective value below the
+        // requested one — that is the budget doing its job, and the numbers
+        // belong in `reports/milestone-v0.3.md`.
+        let iters = args.get(1).and_then(|v| v.parse::<usize>().ok()).unwrap_or(20).max(1);
+        let mut pixels = vec![0u32; 1000 * 700];
+        let pairs = [(0.0f32, 0.0f32), (10.0, 0.0), (50.0, 25.0), (100.0, 50.0)];
+        for (blur, spread) in pairs {
+            let shadow = naro_css::BoxShadow {
+                dx: 0.0,
+                dy: 0.0,
+                blur,
+                spread,
+                color: naro_css::Color { r: 0, g: 0, b: 0, a: 160 },
+                inset: false,
+            };
+            let (effective_blur, effective_spread) =
+                naro_paint::clamp_shadow(300.0, 300.0, blur, spread, 1.0);
+            let mut samples = Vec::with_capacity(iters);
+            for _ in 0..iters {
+                let mut canvas = Canvas::new(&mut pixels, 1000, 700, 1.0);
+                canvas.clear(Color::WHITE);
+                let t = std::time::Instant::now();
+                canvas.fill_shadow(350.0, 200.0, 300.0, 300.0, 0.0, &shadow);
+                samples.push(t.elapsed().as_secs_f64() * 1000.0);
+            }
+            samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let median = samples[samples.len() / 2];
+            println!(
+                "shadow blur={} spread={} efetivo={},{} ms={:.3}",
+                blur, spread, effective_blur, effective_spread, median
+            );
+        }
         return;
     }
 

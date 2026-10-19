@@ -15,6 +15,12 @@ use std::collections::HashMap;
 use naro_html::{Document, NodeId};
 use naro_text::TextMeasure;
 
+/// The `font-family`/`font-weight`/`font-style` a style asks for, in the form
+/// the measurer resolves.
+fn face_of(style: &ComputedStyle) -> naro_text::FontFace<'_> {
+    naro_text::FontFace::new(&style.font_family, style.font_weight, style.italic)
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rect {
     pub x: f32,
@@ -56,7 +62,10 @@ pub struct BlockBox {
     /// Effective clip inherited from ancestors with `overflow != visible`.
     pub clip: Option<Rect>,
     pub border_radius: f32,
-    pub box_shadow: Option<(f32, f32, f32, Color)>,
+    pub box_shadow: Option<naro_css::BoxShadow>,
+    /// `linear-gradient()`/`radial-gradient()` background, painted instead of
+    /// the flat `background` when present. Ignores `border_radius`.
+    pub background_gradient: Option<naro_css::Gradient>,
     /// `opacity: 0` and `visibility: hidden` keep the box but skip the paint.
     pub paint: bool,
     /// `opacity`, applied to every colour this box paints.
@@ -71,7 +80,12 @@ pub struct TextRun {
     pub start: u32,
     pub len: u32,
     pub size: f32,
-    pub bold: bool,
+    /// `font-family` list as written; `""` means the system default. Interned
+    /// per line, so a page with 50k runs allocates once per distinct family
+    /// instead of once per run.
+    pub family: std::sync::Arc<str>,
+    pub weight: u16,
+    pub italic: bool,
     pub color: Color,
     pub link: Option<String>,
     pub underline: bool,
@@ -87,12 +101,17 @@ pub struct TextRun {
 pub struct LinkBox {
     pub rect: Rect,
     pub href: String,
+    /// DOM node the link belongs to, so hit-testing can apply that node's
+    /// transform and a translated `<a>` is clickable where it is painted.
+    pub node: usize,
 }
 
 #[derive(Clone, Debug)]
 pub struct ImageBox {
     pub rect: Rect,
     pub image: SharedImage,
+    pub node: usize,
+    pub object_fit: naro_css::ObjectFit,
 }
 
 /// One filled SVG shape, in device coordinates.
@@ -131,6 +150,11 @@ pub struct Layout {
     pub background_node: Option<usize>,
     /// Filled SVG shapes, painted above the boxes.
     pub svg_shapes: Vec<SvgShape>,
+    /// One page-space matrix per transformed node, already accumulated with
+    /// its ancestors. Empty when the page uses no `transform`, which is the
+    /// common case — an `Option<Affine>` on every box or run would cost ~24
+    /// bytes across the ~750k runs of a large page.
+    pub transforms: HashMap<usize, naro_css::Affine>,
 }
 
 impl Layout {
@@ -153,8 +177,13 @@ impl Layout {
             block.opacity = style.opacity;
             block.background = style.background;
             block.border_color = style.border_color;
-            block.border_radius = style.border_radius;
+            // A percentage radius was resolved against the box during layout;
+            // repeating the same formula here keeps a paint-only restyle from
+            // squaring the corners again.
+            block.border_radius = style.border_radius
+                + block.rect.w.min(block.rect.h) * style.border_radius_percent / 100.0;
             block.box_shadow = style.box_shadow;
+            block.background_gradient = style.background_gradient.clone();
             block.background_image = style
                 .background_image
                 .as_ref()
@@ -193,6 +222,12 @@ enum FlowItem {
 
 struct ImageNode {
     src: String,
+    /// DOM node, so the painter can look up this image's transform.
+    node: usize,
+    /// `object-fit` from the element's computed style.
+    object_fit: naro_css::ObjectFit,
+    /// `aspect-ratio`, used when only one axis is declared.
+    aspect_ratio: Option<f32>,
     width_attr: Option<f32>,
     height_attr: Option<f32>,
     /// Absolutely positioned images are taken out of the inline flow and
@@ -214,7 +249,7 @@ struct BoxNode {
     rowspan: usize,
 }
 
-fn image_node(doc: &Document, id: NodeId) -> Option<ImageNode> {
+fn image_node(doc: &Document, styles: &[ComputedStyle], id: NodeId) -> Option<ImageNode> {
     let src = doc.attr(id, "src")?.trim().to_string();
     if src.is_empty() {
         return None;
@@ -234,8 +269,14 @@ fn image_node(doc: &Document, id: NodeId) -> Option<ImageNode> {
         let end = rest.find(';').unwrap_or(rest.len());
         rest[..end].trim().trim_end_matches("px").trim().parse::<f32>().ok()
     };
+    let style = &styles[id];
     Some(ImageNode {
         src,
+        node: id,
+        // `object-fit` and `aspect-ratio` come from the cascade; the HTML
+        // attributes only carry the intrinsic box.
+        object_fit: style.object_fit,
+        aspect_ratio: style.aspect_ratio,
         width_attr: dim("width"),
         height_attr: dim("height"),
         absolute,
@@ -468,7 +509,7 @@ fn build_children_into(
                     continue;
                 }
                 if tag == "img" {
-                    if let Some(img) = image_node(doc, child) {
+                    if let Some(img) = image_node(doc, styles, child) {
                         items.push(FlowItem::Image(img));
                     }
                     continue;
@@ -603,7 +644,7 @@ fn flatten_inline(
                 if tag == "br" {
                     out.push(FlowItem::Inline(InlineItem::Break));
                 } else if tag == "img" {
-                    if let Some(img) = image_node(doc, child) {
+                    if let Some(img) = image_node(doc, styles, child) {
                         out.push(FlowItem::Image(img));
                     }
                 } else if tag == "svg" {
@@ -639,7 +680,11 @@ struct Word {
     /// before this word on the same line.
     x: f32,
     size: f32,
-    bold: bool,
+    /// Index into `LineBuilder::families`, not the name: a word is 8 bytes
+    /// wider than the string pointer and needs no lifetime.
+    family: u16,
+    weight: u16,
+    italic: bool,
     color: Color,
     link: Option<String>,
     underline: bool,
@@ -674,8 +719,11 @@ struct LineBuilder<'a> {
     atom_height: f32,
     /// Backing store for the words of the current line; cleared on flush.
     buf: String,
-    /// Memoized metrics per (size, bold) for the current line.
-    metrics_cache: Vec<(u32, bool, f32, f32)>,
+    /// Memoized metrics per (size, weight, italic, family) for the current line.
+    /// An exact integer key, so two faces never collide.
+    metrics_cache: Vec<(u32, u16, bool, u16, f32, f32)>,
+    /// Family names referenced by this line, indexed by `Word::family`.
+    families: Vec<std::sync::Arc<str>>,
     line_width: f32,
     /// Whitespace was seen since the last emitted word, so the next one needs a space.
     pending_space: bool,
@@ -714,6 +762,7 @@ impl<'a> LineBuilder<'a> {
             atom_height: 0.0,
             buf: String::new(),
             metrics_cache: Vec::new(),
+            families: Vec::new(),
             line_width: 0.0,
             pending_space: false,
             runs: Vec::new(),
@@ -738,10 +787,24 @@ impl<'a> LineBuilder<'a> {
         self.words.is_empty() && self.atom_height <= 0.0 && self.line_width <= 0.0
     }
 
+    /// Index of `family` in this line's table, pushing it if new.
+    fn family_index(&mut self, family: &str) -> u16 {
+        if let Some(i) = self.families.iter().position(|f| &**f == family) {
+            return i as u16;
+        }
+        // A single line cannot reference 65k distinct families; the clamp only
+        // keeps the cast defined if a pathological document tries.
+        let index = self.families.len().min(u16::MAX as usize) as u16;
+        if self.families.len() < u16::MAX as usize {
+            self.families.push(std::sync::Arc::from(family));
+        }
+        index
+    }
+
     /// Width of the separating space that would precede an atom here.
-    fn atom_space(&self, size: f32, bold: bool) -> f32 {
+    fn atom_space(&self, size: f32, face: naro_text::FontFace<'_>) -> f32 {
         if self.pending_space && !self.at_line_start() {
-            self.measure.measure(" ", size, bold)
+            self.measure.measure(" ", size, face)
         } else {
             0.0
         }
@@ -807,10 +870,11 @@ impl<'a> LineBuilder<'a> {
 
     fn push_word(&mut self, text: &str, style: &ComputedStyle, link: &Option<String>, node: NodeId) {
         let size = style.font_size;
-        let bold = style.font_weight >= 600;
-        let word_w = self.measure.measure(text, size, bold);
+        let family = self.family_index(&style.font_family);
+        let (weight, italic) = (style.font_weight, style.italic);
+        let word_w = self.measure.measure(text, size, face_of(style));
         let mut space_w = if self.pending_space && !self.words.is_empty() {
-            self.space_width(size, bold)
+            self.space_width(size, family, weight, italic)
         } else {
             0.0
         };
@@ -843,12 +907,15 @@ impl<'a> LineBuilder<'a> {
         self.line_width += width;
         let start = self.buf.len() as u32;
         self.buf.push_str(text);
+        let family = self.family_index(&style.font_family);
         self.words.push(Word {
             start,
             len: text.len() as u32,
             x: start_x,
             size: style.font_size,
-            bold: style.font_weight >= 600,
+            family,
+            weight: style.font_weight,
+            italic: style.italic,
             color: style.color,
             link: link.clone(),
             underline: style.underline,
@@ -871,12 +938,12 @@ impl<'a> LineBuilder<'a> {
         leading_space: f32,
     ) {
         let size = style.font_size;
-        let bold = style.font_weight >= 600;
+        let face = face_of(style);
         let mut chunk_start = 0usize;
         let mut chunk_w = 0.0;
         let mut space = leading_space;
         for (i, ch) in text.char_indices() {
-            let cw = self.char_width(ch, size, bold);
+            let cw = self.char_width(ch, size, face);
             if i > chunk_start && self.line_width + chunk_w + cw > self.width + FIT_EPSILON {
                 let (done, rest) = text.split_at(i);
                 let _ = rest;
@@ -893,32 +960,42 @@ impl<'a> LineBuilder<'a> {
         }
     }
 
-    /// Width of a single space at this size/weight, memoized per line.
-    fn space_width(&mut self, size: f32, bold: bool) -> f32 {
-        let key = (size.to_bits(), bold);
-        if let Some((_, _, w, _)) = self.metrics_cache.iter().find(|(s, b, _, _)| *s == key.0 && *b == key.1) {
+    /// Width of a single space at this size/face, memoized per line.
+    fn space_width(&mut self, size: f32, family: u16, weight: u16, italic: bool) -> f32 {
+        let key = (size.to_bits(), weight, italic, family);
+        if let Some((_, _, _, _, w, _)) = self
+            .metrics_cache
+            .iter()
+            .find(|(s, wt, it, f, _, _)| (*s, *wt, *it, *f) == key)
+        {
             return *w;
         }
-        let w = self.measure.measure(" ", size, bold);
-        let ascent = self.measure.line_metrics(size, bold).0;
-        self.metrics_cache.push((key.0, bold, w, ascent));
+        let face = naro_text::FontFace::new(&self.families[family as usize], weight, italic);
+        let w = self.measure.measure(" ", size, face);
+        let ascent = self.measure.line_metrics(size, face).0;
+        self.metrics_cache.push((key.0, weight, italic, family, w, ascent));
         w
     }
 
-    fn char_width(&mut self, ch: char, size: f32, bold: bool) -> f32 {
+    fn char_width(&mut self, ch: char, size: f32, face: naro_text::FontFace<'_>) -> f32 {
         let mut buf = [0u8; 4];
         let s = ch.encode_utf8(&mut buf);
-        self.measure.measure(s, size, bold)
+        self.measure.measure(s, size, face)
     }
 
-    fn ascent_of(&mut self, size: f32, bold: bool) -> f32 {
-        let key = (size.to_bits(), bold);
-        if let Some((_, _, _, a)) = self.metrics_cache.iter().find(|(s, b, _, _)| *s == key.0 && *b == key.1) {
+    fn ascent_of(&mut self, size: f32, family: u16, weight: u16, italic: bool) -> f32 {
+        let key = (size.to_bits(), weight, italic, family);
+        if let Some((_, _, _, _, _, a)) = self
+            .metrics_cache
+            .iter()
+            .find(|(s, wt, it, f, _, _)| (*s, *wt, *it, *f) == key)
+        {
             return *a;
         }
-        let w = self.measure.measure(" ", size, bold);
-        let ascent = self.measure.line_metrics(size, bold).0;
-        self.metrics_cache.push((key.0, bold, w, ascent));
+        let face = naro_text::FontFace::new(&self.families[family as usize], weight, italic);
+        let w = self.measure.measure(" ", size, face);
+        let ascent = self.measure.line_metrics(size, face).0;
+        self.metrics_cache.push((key.0, weight, italic, family, w, ascent));
         ascent
     }
 
@@ -928,11 +1005,14 @@ impl<'a> LineBuilder<'a> {
         }
         let mut line_height = self.atom_height;
         let mut ascent = 0.0f32;
-        let sizes: Vec<(f32, bool, f32)> =
-            self.words.iter().map(|w| (w.size, w.bold, w.line_height)).collect();
-        for (size, bold, lh) in sizes {
+        let sizes: Vec<(f32, u16, u16, bool, f32)> = self
+            .words
+            .iter()
+            .map(|w| (w.size, w.family, w.weight, w.italic, w.line_height))
+            .collect();
+        for (size, family, weight, italic, lh) in sizes {
             line_height = line_height.max(lh);
-            ascent = ascent.max(self.ascent_of(size, bold));
+            ascent = ascent.max(self.ascent_of(size, family, weight, italic));
         }
         if line_height <= 0.0 {
             line_height = self.default_size * self.default_line_height;
@@ -953,7 +1033,7 @@ impl<'a> LineBuilder<'a> {
             self.atom_shifts.push((mark, align_offset));
         }
 
-        let mut link_spans: Vec<(String, f32, f32)> = Vec::new();
+        let mut link_spans: Vec<(String, usize, f32, f32)> = Vec::new();
         let mut words = std::mem::take(&mut self.words);
         let mut buf = std::mem::take(&mut self.buf);
         // Coalesce adjacent words that share a style and link into one run,
@@ -965,13 +1045,13 @@ impl<'a> LineBuilder<'a> {
             let run_x = self.x + align_offset + w.x;
             if let Some(href) = &w.link {
                 let end = run_x + w.width;
-                match link_spans.iter_mut().find(|(h, _, _)| h == href) {
-                    Some((_, start, last_end)) => {
+                match link_spans.iter_mut().find(|(h, _, _, _)| h == href) {
+                    Some((_, _, start, last_end)) => {
                         *start = start.min(run_x);
                         *last_end = last_end.max(end);
                     }
                     // Clone only when a new span starts, not per word.
-                    None => link_spans.push((href.clone(), run_x, end)),
+                    None => link_spans.push((href.clone(), w.node, run_x, end)),
                 }
             }
 
@@ -983,7 +1063,9 @@ impl<'a> LineBuilder<'a> {
             let mergeable = adjacent
                 && pending.as_ref().is_some_and(|p| {
                     p.size == w.size
-                        && p.bold == w.bold
+                        && p.weight == w.weight
+                        && p.italic == w.italic
+                        && p.family == self.families[w.family as usize]
                         && p.color == w.color
                         && p.link == w.link
                         && w.space_before > 0.0
@@ -1007,7 +1089,9 @@ impl<'a> LineBuilder<'a> {
                     start,
                     len: self.arena.len() as u32 - start,
                     size: w.size,
-                    bold: w.bold,
+                    family: self.families[w.family as usize].clone(),
+                    weight: w.weight,
+                    italic: w.italic,
                     color: w.color,
                     link: w.link,
                     underline: w.underline,
@@ -1021,10 +1105,11 @@ impl<'a> LineBuilder<'a> {
             self.runs.push(run);
         }
 
-        for (href, start, end) in link_spans {
+        for (href, node, start, end) in link_spans {
             self.links.push(LinkBox {
                 rect: Rect { x: start, y: self.y, w: end - start, h: line_height },
                 href,
+                node,
             });
         }
 
@@ -1067,6 +1152,19 @@ struct Flow<'a> {
     /// The document being laid out, so attributes (`viewBox`, `d`, `fill`) can
     /// be read without threading them through every box.
     doc: Option<&'a Document>,
+    /// Page-space matrices of the transformed ancestors of the box being laid
+    /// out. Empty for a page without `transform`.
+    transform_stack: Vec<naro_css::Affine>,
+    /// One page-space matrix per transformed node.
+    transforms: HashMap<usize, naro_css::Affine>,
+    /// True while a transformed box is being laid out once just to learn its
+    /// own height, so its origin can be resolved. The probe throws its output
+    /// away; only the rect is kept.
+    probing: bool,
+    /// Nodes whose transform has already been applied. The second pass of a
+    /// transformed box must not take the probe branch again, or it recurses
+    /// forever.
+    applied_transforms: Vec<usize>,
     /// Width decided by the flex algorithm for the item being laid out.
     ///
     /// A flex item's used width is not its declared `width` — it may have been
@@ -1120,8 +1218,7 @@ impl<'a> Flow<'a> {
                         .inline_atom_width(child, width)
                         .clamp(1.0, width.max(1.0));
                     let font_size = child.style.font_size;
-                    let bold = child.style.font_weight >= 600;
-                    let mut lead = line.atom_space(font_size, bold);
+                    let mut lead = line.atom_space(font_size, face_of(&child.style));
                     if !line.fits(box_w, lead) {
                         line.flush();
                         lead = 0.0;
@@ -1160,8 +1257,7 @@ impl<'a> Flow<'a> {
                         h
                     };
                     let size = style.font_size;
-                    let bold = style.font_weight >= 600;
-                    let mut lead = line.atom_space(size, bold);
+                    let mut lead = line.atom_space(size, face_of(style));
                     if !line.fits(w, lead) {
                         line.flush();
                         lead = 0.0;
@@ -1173,6 +1269,8 @@ impl<'a> Flow<'a> {
                         self.image_boxes.push(ImageBox {
                             rect: Rect { x: x_pos, y: line.y_top(), w, h },
                             image: shared.clone(),
+                            node: img.node,
+                            object_fit: img.object_fit,
                         });
                     }
                     line.place_atom(lead + w, h);
@@ -1260,6 +1358,15 @@ impl<'a> Flow<'a> {
             .get(&img.src)
             .map(|i| (i.width as f32, i.height as f32))
             .unwrap_or((150.0, 150.0));
+        // An `aspect-ratio` from CSS decides the missing axis, and beats the
+        // image's own ratio the way `aspect-ratio` does in CSS.
+        if let Some(ratio) = img.aspect_ratio {
+            match (img.width_attr, img.height_attr) {
+                (Some(w), None) => return (w, w / ratio),
+                (None, Some(h)) => return (h * ratio, h),
+                _ => {}
+            }
+        }
         match (img.width_attr, img.height_attr) {
             (Some(w), Some(h)) => (w, h),
             (Some(w), None) => {
@@ -1317,19 +1424,15 @@ impl<'a> Flow<'a> {
                 if let Some(label) = control_text(doc, b.node) {
                     let mut widest = 0.0f32;
                     for word in label.split(' ') {
-                        let w = self.measure.measure(
-                            word,
-                            b.style.font_size,
-                            b.style.font_weight >= 600,
-                        );
+                        let w = self
+                            .measure
+                            .measure(word, b.style.font_size, face_of(&b.style));
                         widest = widest.max(w);
                     }
                     // Buttons do not wrap their label, so the whole string counts.
-                    let whole = self.measure.measure(
-                        &label,
-                        b.style.font_size,
-                        b.style.font_weight >= 600,
-                    );
+                    let whole = self
+                        .measure
+                        .measure(&label, b.style.font_size, face_of(&b.style));
                     return whole.max(widest);
                 }
             }
@@ -1375,17 +1478,17 @@ impl<'a> Flow<'a> {
             match item {
                 FlowItem::Inline(InlineItem::Text { text, style, .. }) => {
                     for word in text.split(' ') {
-                        let w = self
-                            .measure
-                            .measure(word, style.font_size, style.font_weight >= 600);
-                        let space = self.measure.measure(" ", style.font_size, style.font_weight >= 600);
+                        let w = self.measure.measure(word, style.font_size, face_of(style));
+                        let space = self.measure.measure(" ", style.font_size, face_of(style));
                         // The separator only counts between words; the
                         // parenthesised form keeps `+ w` outside the `if`.
                         current += (if current > 0.0 { space } else { 0.0 }) + w;
                     }
                 }
                 FlowItem::Inline(InlineItem::Space) => {
-                    current += self.measure.measure(" ", 16.0, false);
+                    current += self
+                        .measure
+                        .measure(" ", 16.0, naro_text::FontFace::default());
                 }
                 FlowItem::InlineBox(child) => {
                     // Inline atoms share a line, so their widths add up. Taking
@@ -1441,11 +1544,9 @@ impl<'a> Flow<'a> {
         if matches!(b.tag.as_str(), "input" | "button" | "select") {
             if let Some(doc) = self.doc {
                 if let Some(label) = control_text(doc, b.node) {
-                    return self.measure.measure(
-                        &label,
-                        b.style.font_size,
-                        b.style.font_weight >= 600,
-                    );
+                    return self
+                        .measure
+                        .measure(&label, b.style.font_size, face_of(&b.style));
                 }
             }
         }
@@ -1454,9 +1555,7 @@ impl<'a> Flow<'a> {
             match item {
                 FlowItem::Inline(InlineItem::Text { text, style, .. }) => {
                     for word in text.split(' ') {
-                        let w = self
-                            .measure
-                            .measure(word, style.font_size, style.font_weight >= 600);
+                        let w = self.measure.measure(word, style.font_size, face_of(style));
                         widest = widest.max(w);
                     }
                 }
@@ -1646,6 +1745,9 @@ impl<'a> Flow<'a> {
             w: width + s.padding.horizontal_at(available_width) + s.border.horizontal(),
             h: height + s.padding.vertical_at(available_width) + s.border.vertical(),
         };
+        // `border-radius: 50%` is a fraction of the box, and this is the first
+        // point that knows the box. The painter still receives pixels only.
+        let radius = s.border_radius + rect.w.min(rect.h) * s.border_radius_percent / 100.0;
         self.blocks.push(BlockBox {
             rect,
             background: s.background,
@@ -1655,8 +1757,9 @@ impl<'a> Flow<'a> {
             tag: b.tag.clone(),
             node: b.node,
             clip: self.clip,
-            border_radius: s.border_radius,
+            border_radius: radius,
             box_shadow: s.box_shadow,
+            background_gradient: s.background_gradient.clone(),
             paint: s.visible && s.opacity > 0.0,
             opacity: s.opacity,
         });
@@ -1759,7 +1862,83 @@ impl<'a> Flow<'a> {
         w
     }
 
+    /// Sizes of every output vector, so a probe pass can be undone.
+    fn mark_subtree(&self) -> (usize, usize, usize, usize, usize, usize) {
+        (
+            self.blocks.len(),
+            self.runs.len(),
+            self.links.len(),
+            self.image_boxes.len(),
+            self.svg_shapes.len(),
+            self.arena.len(),
+        )
+    }
+
+    fn truncate_subtree(&mut self, mark: (usize, usize, usize, usize, usize, usize)) {
+        self.blocks.truncate(mark.0);
+        self.runs.truncate(mark.1);
+        self.links.truncate(mark.2);
+        self.image_boxes.truncate(mark.3);
+        self.svg_shapes.truncate(mark.4);
+        self.arena.truncate(mark.5);
+    }
+
+    /// The page-space matrix of a box: the parent's matrix, then this box's own
+    /// transform conjugated by its position and `transform-origin`.
+    fn page_matrix(&self, style: &ComputedStyle, rect: Rect) -> naro_css::Affine {
+        let parent = self
+            .transform_stack
+            .last()
+            .copied()
+            .unwrap_or(naro_css::Affine::IDENTITY);
+        let Some(m) = style.transform else { return parent };
+        let ox = rect.w * style.transform_origin.0;
+        let oy = rect.h * style.transform_origin.1;
+        let local = naro_css::Affine::translate(ox, oy)
+            .multiply(m)
+            .multiply(naro_css::Affine::translate(-ox, -oy));
+        parent
+            .multiply(naro_css::Affine::translate(rect.x, rect.y))
+            .multiply(local)
+            .multiply(naro_css::Affine::translate(-rect.x, -rect.y))
+    }
+
     fn block(&mut self, b: &BoxNode, x: f32, y: f32, available_width: f32) -> f32 {
+        // A transformed box needs its own size to resolve `transform-origin`
+        // in pixels, and its children need that matrix. The size only comes
+        // out of a full layout, so the box is laid out once as a probe, its
+        // output thrown away, and then laid out again with the real matrix on
+        // the stack. Layout is transform-independent, so the second pass is
+        // identical — and only transformed boxes pay for it.
+        if b.style.transform.is_some()
+            && !self.probing
+            && !self.applied_transforms.contains(&b.node)
+        {
+            let mark = self.mark_subtree();
+            self.probing = true;
+            let probe_bottom = self.block(b, x, y, available_width);
+            self.probing = false;
+            let rect = self
+                .blocks
+                .iter()
+                .rev()
+                .find(|block| block.node == b.node)
+                .map(|block| block.rect);
+            self.truncate_subtree(mark);
+            if let Some(rect) = rect {
+                let matrix = self.page_matrix(&b.style, rect);
+                self.transforms.insert(b.node, matrix);
+                self.transform_stack.push(matrix);
+                self.applied_transforms.push(b.node);
+                let bottom = self.block(b, x, y, available_width);
+                self.applied_transforms.pop();
+                self.transform_stack.pop();
+                return bottom;
+            }
+            // No box was produced (an SVG, a table row…): fall through to the
+            // single pass below, which records nothing.
+            return probe_bottom;
+        }
         // Consume the flex width first: the early returns below (svg, flex,
         // grid, table) never reach the normal path, and a leftover value would
         // be applied to whatever box is laid out next.
@@ -1897,6 +2076,15 @@ impl<'a> Flow<'a> {
         if matches!(b.tag.as_str(), "input" | "textarea") {
             content_height = content_height.max(s.font_size * s.line_height);
         }
+        // `aspect-ratio` decides the height only when nothing else does: a
+        // declared `height` wins and `min`/`max-height` still clamp.
+        if definite_height(s).is_none() {
+            if let Some(ratio) = s.aspect_ratio {
+                if ratio > 0.0 {
+                    content_height = content_w / ratio;
+                }
+            }
+        }
         let mut height = s.border.vertical() + s.padding.vertical_at(available_width) + content_height;
         if let Some(h) = definite_height(s) {
             // A declared `height` is definite: the box keeps it and the
@@ -1927,6 +2115,9 @@ impl<'a> Flow<'a> {
         }
 
         let index = self.blocks.len();
+        // `border-radius: 50%` is a fraction of the box, and this is the first
+        // point that knows the box. The painter still receives pixels only.
+        let radius = s.border_radius + rect.w.min(rect.h) * s.border_radius_percent / 100.0;
         self.blocks.push(BlockBox {
             rect,
             background: s.background,
@@ -1939,8 +2130,9 @@ impl<'a> Flow<'a> {
             tag: b.tag.clone(),
             node: b.node,
             clip: saved_clip,
-            border_radius: s.border_radius,
+            border_radius: radius,
             box_shadow: s.box_shadow,
+            background_gradient: s.background_gradient.clone(),
             paint: s.visible && s.opacity > 0.0,
             opacity: s.opacity,
         });
@@ -2000,6 +2192,8 @@ impl<'a> Flow<'a> {
             self.image_boxes.push(ImageBox {
                 rect: Rect { x, y, w, h },
                 image: shared.clone(),
+                node: img.node,
+                object_fit: img.object_fit,
             });
         }
     }
@@ -2141,6 +2335,9 @@ impl<'a> Flow<'a> {
             w: s.border.horizontal() + s.padding.horizontal_at(available_width) + content_w,
             h: height,
         };
+        // `border-radius: 50%` is a fraction of the box, and this is the first
+        // point that knows the box. The painter still receives pixels only.
+        let radius = s.border_radius + rect.w.min(rect.h) * s.border_radius_percent / 100.0;
         self.blocks.push(BlockBox {
             rect,
             background: s.background,
@@ -2153,8 +2350,9 @@ impl<'a> Flow<'a> {
             tag: b.tag.clone(),
             node: b.node,
             clip: self.clip,
-            border_radius: s.border_radius,
+            border_radius: radius,
             box_shadow: s.box_shadow,
+            background_gradient: s.background_gradient.clone(),
             paint: s.visible && s.opacity > 0.0,
             opacity: s.opacity,
         });
@@ -2420,6 +2618,9 @@ impl<'a> Flow<'a> {
             h: height,
         };
         let index = self.blocks.len();
+        // `border-radius: 50%` is a fraction of the box, and this is the first
+        // point that knows the box. The painter still receives pixels only.
+        let radius = s.border_radius + rect.w.min(rect.h) * s.border_radius_percent / 100.0;
         self.blocks.push(BlockBox {
             rect,
             background: s.background,
@@ -2432,8 +2633,9 @@ impl<'a> Flow<'a> {
             tag: b.tag.clone(),
             node: b.node,
             clip: self.clip,
-            border_radius: s.border_radius,
+            border_radius: radius,
             box_shadow: s.box_shadow,
+            background_gradient: s.background_gradient.clone(),
             paint: s.visible && s.opacity > 0.0,
             opacity: s.opacity,
         });
@@ -2612,6 +2814,9 @@ impl<'a> Flow<'a> {
             w: s.border.horizontal() + s.padding.horizontal_at(available_width) + content_w,
             h: height,
         };
+        // `border-radius: 50%` is a fraction of the box, and this is the first
+        // point that knows the box. The painter still receives pixels only.
+        let radius = s.border_radius + rect.w.min(rect.h) * s.border_radius_percent / 100.0;
         self.blocks.push(BlockBox {
             rect,
             background: s.background,
@@ -2624,8 +2829,9 @@ impl<'a> Flow<'a> {
             tag: b.tag.clone(),
             node: b.node,
             clip: self.clip,
-            border_radius: s.border_radius,
+            border_radius: radius,
             box_shadow: s.box_shadow,
+            background_gradient: s.background_gradient.clone(),
             paint: s.visible && s.opacity > 0.0,
             opacity: s.opacity,
         });
@@ -2689,6 +2895,9 @@ impl<'a> Flow<'a> {
             }
         }
         let index = self.blocks.len();
+        // `border-radius: 50%` is a fraction of the box, and this is the first
+        // point that knows the box. The painter still receives pixels only.
+        let radius = s.border_radius + rect.w.min(rect.h) * s.border_radius_percent / 100.0;
         self.blocks.push(BlockBox {
             rect,
             background: s.background,
@@ -2701,8 +2910,9 @@ impl<'a> Flow<'a> {
             tag: b.tag.clone(),
             node: b.node,
             clip: saved_clip,
-            border_radius: s.border_radius,
+            border_radius: radius,
             box_shadow: s.box_shadow,
+            background_gradient: s.background_gradient.clone(),
             paint: s.visible && s.opacity > 0.0,
             opacity: s.opacity,
         });
@@ -2945,6 +3155,9 @@ impl<'a> Flow<'a> {
             h: height,
         };
         let saved_clip = self.clip;
+        // `border-radius: 50%` is a fraction of the box, and this is the first
+        // point that knows the box. The painter still receives pixels only.
+        let radius = s.border_radius + rect.w.min(rect.h) * s.border_radius_percent / 100.0;
         self.blocks.push(BlockBox {
             rect,
             background: s.background,
@@ -2957,8 +3170,9 @@ impl<'a> Flow<'a> {
             tag: b.tag.clone(),
             node: b.node,
             clip: saved_clip,
-            border_radius: s.border_radius,
+            border_radius: radius,
             box_shadow: s.box_shadow,
+            background_gradient: s.background_gradient.clone(),
             paint: s.visible && s.opacity > 0.0,
             opacity: s.opacity,
         });
@@ -3233,6 +3447,10 @@ pub fn layout_with_viewport(
         containing: Rect { x: 0.0, y: 0.0, w: viewport_width.max(1.0), h: 10_000.0 },
         viewport: Rect { x: 0.0, y: 0.0, w: viewport_width.max(1.0), h: viewport_height.max(1.0) },
         svg_shapes: Vec::new(),
+        transform_stack: Vec::new(),
+        transforms: HashMap::new(),
+        probing: false,
+        applied_transforms: Vec::new(),
         static_positions: std::collections::HashMap::new(),
         doc: Some(doc),
         flex_width: None,
@@ -3254,6 +3472,7 @@ pub fn layout_with_viewport(
         background,
         background_node,
         svg_shapes: flow.svg_shapes,
+        transforms: flow.transforms,
     }
 }
 
@@ -3265,10 +3484,10 @@ mod tests {
     struct MockMeasure;
 
     impl TextMeasure for MockMeasure {
-        fn measure(&self, text: &str, size_px: f32, _bold: bool) -> f32 {
+        fn measure(&self, text: &str, size_px: f32, _face: naro_text::FontFace<'_>) -> f32 {
             text.chars().count() as f32 * size_px * 0.5
         }
-        fn line_metrics(&self, size_px: f32, _bold: bool) -> (f32, f32) {
+        fn line_metrics(&self, size_px: f32, _face: naro_text::FontFace<'_>) -> (f32, f32) {
             (size_px * 0.8, size_px * 0.2)
         }
     }
@@ -4553,5 +4772,123 @@ mod tests {
         );
         assert_eq!(layout.text_runs.len(), 1);
         assert_eq!(layout.text_runs[0].text(&layout), "sombra");
+    }
+
+    #[test]
+    fn font_family_reaches_the_text_run() {
+        let layout = build(
+            "<p style=\"font-family: monospace; font-weight: 700\">x</p>",
+            "",
+            1000.0,
+        );
+        let run = layout.text_runs.first().expect("a run");
+        assert_eq!(&*run.family, "monospace");
+        assert_eq!(run.weight, 700);
+        assert!(!run.italic);
+    }
+
+    #[test]
+    fn italic_reaches_the_text_run() {
+        let layout = build("<p style=\"font-style: italic\">x</p>", "", 1000.0);
+        assert!(layout.text_runs.first().expect("a run").italic);
+    }
+
+    #[test]
+    fn aspect_ratio_derives_the_height() {
+        let layout = build(
+            "<div id=\"a\"></div>",
+            "div { width: 200px; aspect-ratio: 2 / 1 }",
+            1000.0,
+        );
+        let block = layout.blocks.iter().find(|b| b.tag == "div").expect("caixa");
+        assert!((block.rect.w - 200.0).abs() < 0.5, "largura {}", block.rect.w);
+        assert!((block.rect.h - 100.0).abs() < 0.5, "altura {}", block.rect.h);
+    }
+
+    #[test]
+    fn transform_does_not_move_the_box_but_records_a_matrix() {
+        let layout = build(
+            "<div id=\"t\">x</div><p>y</p>",
+            "div { transform: translate(200px, 0) }",
+            1000.0,
+        );
+        let block = layout.blocks.iter().find(|b| b.tag == "div").expect("caixa");
+        // Layout is untouched: the box stays where flow put it.
+        assert!(block.rect.x.abs() < 0.5);
+        let matrix = layout.transforms.get(&block.node).expect("matriz do nó");
+        let (x, y) = matrix.apply(0.0, 0.0);
+        assert!((x - 200.0).abs() < 0.5, "x = {x}");
+        assert!(y.abs() < 0.5);
+        // A node without a transform has no entry.
+        let p = layout.blocks.iter().find(|b| b.tag == "p").expect("p");
+        assert!(layout.transforms.get(&p.node).is_none());
+    }
+
+    #[test]
+    fn a_child_inherits_its_parent_transform() {
+        let layout = build(
+            "<div id=\"p\"><div id=\"c\">x</div></div>",
+            "#p { width: 300px; transform: translate(100px, 0) }\
+             #c { width: 100px; transform: translate(0, 50px) }",
+            1000.0,
+        );
+        let parent = layout.blocks.iter().find(|b| (b.rect.w - 300.0).abs() < 0.5).expect("pai");
+        let child = layout.blocks.iter().find(|b| (b.rect.w - 100.0).abs() < 0.5).expect("filho");
+        let (px, py) = layout.transforms[&parent.node].apply(0.0, 0.0);
+        assert!((px - 100.0).abs() < 0.5 && py.abs() < 0.5, "pai {px},{py}");
+        // The child carries the parent's translation plus its own: the parent
+        // turns into the containing block and transforms its whole subtree.
+        let (cx, cy) = layout.transforms[&child.node].apply(0.0, 0.0);
+        assert!((cx - 100.0).abs() < 0.5, "filho x = {cx}");
+        assert!((cy - 50.0).abs() < 0.5, "filho y = {cy}");
+    }
+
+    #[test]
+    fn transform_origin_changes_the_matrix() {
+        let left = build(
+            "<div>x</div>",
+            "div { width: 100px; height: 100px; transform: rotate(90deg); transform-origin: left top }",
+            1000.0,
+        );
+        let center = build(
+            "<div>x</div>",
+            "div { width: 100px; height: 100px; transform: rotate(90deg); transform-origin: center }",
+            1000.0,
+        );
+        let a = left.blocks.iter().find(|b| b.tag == "div").unwrap();
+        let b = center.blocks.iter().find(|b| b.tag == "div").unwrap();
+        let ma = left.transforms[&a.node];
+        let mb = center.transforms[&b.node];
+        assert_ne!(ma, mb);
+        // About the top-left corner the corner itself does not move.
+        let (ax, ay) = ma.apply(a.rect.x, a.rect.y);
+        assert!((ax - a.rect.x).abs() < 0.5 && (ay - a.rect.y).abs() < 0.5);
+        // About the centre (50,50), a 90° rotation sends the top-left corner
+        // to (100, 0).
+        let (bx, by) = mb.apply(b.rect.x, b.rect.y);
+        assert!((bx - (b.rect.x + 100.0)).abs() < 0.5, "bx = {bx}");
+        assert!((by - b.rect.y).abs() < 0.5, "by = {by}");
+    }
+
+    #[test]
+    fn object_fit_reaches_the_image_box() {
+        let doc = Document::parse(
+            "<img src=\"a.png\" width=\"100\" height=\"100\" style=\"object-fit:contain\">",
+        );
+        let styles = compute_styles(&doc, &parse_stylesheet(""));
+        // An `ImageBox` only exists once the payload is decoded, so the map
+        // carries a 2x1 image.
+        let mut images = HashMap::new();
+        images.insert(
+            "a.png".to_string(),
+            std::sync::Arc::new(naro_image::Image {
+                width: 2,
+                height: 1,
+                rgba: vec![255, 0, 0, 255, 255, 0, 0, 255],
+            }),
+        );
+        let layout = layout(&doc, &styles, &MockMeasure, 1000.0, &images);
+        let image = layout.images.first().expect("imagem");
+        assert_eq!(image.object_fit, naro_css::ObjectFit::Contain);
     }
 }

@@ -1,6 +1,7 @@
 # Estado do roadmap
 
-Marco em execução: **v0.2** (fases A0, A1, A2, A3, A7). Plano: `local://naro-global-roadmap-plan.md`.
+Marco em execução: **v0.3** concluído (fases A4, A5a, A5b). Plano:
+`local://naro-roadmap-v03-plan.md`; roadmap global em `local://naro-global-roadmap-plan.md`.
 
 ## Fases
 
@@ -12,15 +13,111 @@ Marco em execução: **v0.2** (fases A0, A1, A2, A3, A7). Plano: `local://naro-g
 | A3 | concluída | tag `phase-a3`; `233 passed / 0 failed`; `--compat` **30 pass / 0 falhas / 2 não suportados** (32) e `--compat --serve` **31 pass / 0 falhas / 1 não suportado**; `31-forms.html` (checkbox/radio/:checked/label/select/POST) e `32-selection.html` (`selection:` em duas direções); `--render ... --select` mostra 5090 px de realce nas linhas certas; 4 páginas de referência com `JS ERROR` e `CONTENT_HEIGHT` idênticos; `p8-rust` difere em 84 linhas, todas explicadas pela caixa do `<select>` | 1 | ver desvios abaixo |
 | A7 | concluída | tag `phase-a7`; `235 passed / 0 failed`; `--compat` 30/0/3 e `--compat --serve` **32 pass / 0 falhas / 1 não suportado**; `33-origin.html` prova `same.ok=true`, `cross.star=cors-ok`, `cross.blocked=true` (TypeError, corpo nunca entregue) e `blocked:assets/red.png` (CSP `img-src 'self'`); `file://` não alcança a rede (`local.blocked=true`); 4 páginas de referência idênticas ao baseline; `diff reports/p8-rust-a3.txt` = 0 | 1 | ver desvios abaixo |
 | Marco v0.2 | concluída | `reports/milestone-v0.2.md`; tag `milestone-v0.2` | 1 | execução aprovada encerrada |
+| A4 | concluída | tag `phase-a4`; `251 passed / 0 failed`; `--compat` **30 / 0 / 4** (34) e `--compat --serve` **33 / 0 / 1**; `34-fonts.html` prova `font-family`, `font-weight`, `@font-face` de um TTF commitado e a síntese de negrito (`ff=monospace`, `fw=700`, `fx=Naro Fixture, sans-serif`, `runfont:`, `boxdiff:`); 4 páginas de referência com `JS ERROR` e `CONTENT_HEIGHT` idênticos; `p8-rust-v03` difere em 2 hunks (at-rule 45→0, baseline de 96 px em 0.7 px) | 1 | WOFF2 bloqueado, ver abaixo |
+| A5a | concluída | tag `phase-a5a`; `268 passed / 0 failed`; `--compat` **31 / 0 / 4** (35) e `--compat --serve` **34 / 0 / 1**; `35-visual.html` com 8 `pixel:` (gradiente linear e radial, sombra com spread, círculo de raio percentual); `--bench-shadow 20` mede `(100,50)` em **6.98 ms** contra orçamento de 8 ms | 1 | ver desvios abaixo |
+| A5b | concluída | tag `phase-a5b`; `289 passed / 0 failed`; `--compat` **32 / 0 / 4** (36) e `--compat --serve` **35 / 0 / 1**; `36-transform.html` com 8 `pixel:`, `box:` provando layout intocado e `hit:`/`nothit:` provando o clique na posição pintada; testes de matriz pai→filho, espelho e `scale(0)` | 1 | ver desvios abaixo |
+| Marco v0.3 | concluída | `reports/milestone-v0.3.md`; tag `milestone-v0.3` | 1 | A5c, A6, A8 e A9 aguardam autorização |
 
 ## Próxima ação
 
-Nenhuma: o marco v0.2 está encerrado. A4, A5, A6, A8 e A9 estão especificadas e
-aguardam autorização.
+**A5c — completude de layout** (`float`/`clear`, `vertical-align`,
+`border-collapse`, `order`, `grid-area`), na ordem do roadmap global: depois de
+A5b e antes de A6. Aguarda autorização; o plano de A5c será escrito quando ela
+vier.
 
 ## Bloqueios
 
-Nenhum.
+1. **`woff2` 0.3.0 não compila no rustc 1.99.1** — 23 erros, todos dentro do
+   crate: `SafeBuf::try_get_u8` colide com `std::io::Buf::try_get_u8`
+   (`E0034`, 15 ocorrências) e `?` não converte `Base128Error`/`Truncated`/
+   `TableDirectoryError` (`E0277`). Tentativas: (a) adicionar `woff2 = "0.3"` e
+   compilar — falhou como acima; (b) `cargo info woff2` para achar outra versão —
+   0.3.0 é a única publicada; (c) remover a dependência. Decisão: **A4 segue com
+   TTF/OTF apenas**; `register_web_family` devolve `Err("WOFF2 não suportado
+   nesta build")` e `naro-net`/`prepare_fonts` pulam URLs `.woff2`/`.woff` para
+   não gastar o orçamento de download. O fixture de `34-fonts.html` é um TTF OFL
+   (`tests/compat/assets/fixture.ttf`, Roboto de `cdn.jsdelivr.net/fontsource`),
+   porque commitar uma fonte do sistema é proibido por licença. Item "WOFF2"
+   fica marcado como bloqueado, não como cumprido.
+
+## Desvios e decisões de A5b
+
+1. **Uma matriz por nó, e a mesma para pintar e clicar.** `Layout::transforms`
+   guarda a matriz de página já acumulada com os ancestrais. A pintura faz
+   `push_transform`; o hit-testing faz `inverse()` da **mesma** entrada. Para
+   runs, imagens e links — que são keyed pelo nó que os produziu, muitas vezes um
+   nó de texto — o engine propaga a matriz pela árvore uma vez
+   (`effective_transforms`), o que dá a cada nó exatamente a matriz que o pintor
+   usa, sem uma segunda fonte de verdade e sem 24 bytes por run.
+2. **A caixa é medida uma vez como sonda.** `transform-origin` em `%` precisa da
+   caixa em px, e a caixa só existe depois do layout. Um nó com `transform` é
+   disposto uma vez, o resultado é descartado (marcadores de tamanho dos vetores
+   de saída), a matriz é calculada e o nó é disposto de novo com a matriz na
+   pilha. Layout não depende de transformação, então a segunda passada é
+   idêntica; só nós transformados pagam.
+3. **`geometry_differs` inclui `transform`, `transform_origin` e `object_fit`**
+   apesar de não moverem caixas: a matriz e o sub-retângulo vivem no `Layout`,
+   então um restyle que só muda `transform` precisa reconstruir o layout, senão a
+   página continua pintando a matriz antiga. Há teste para isso
+   (`restyling_transform_rebuilds_the_matrix`).
+4. **`LinkBox` ganhou `node`** para que `hit_link` aplique a matriz do `<a>`. Sem
+   isso um link deslocado seria clicável na posição de layout.
+5. **Ordem de pintura do `body`**: um filho absoluto é pintado antes da caixa do
+   ancestral (comportamento pré-existente), então o fixture usa `body`
+   transparente. Registrado como limitação, não como mudança de critério.
+
+## Desvios e decisões de A5a
+
+1. **O teto de sombra é sobre a alocação total, e a máscara é recortada pelo
+   clip.** `shadow_mask_bytes` conta os **dois** buffers (`u8`, máscara +
+   temporário do blur horizontal); `clamp_shadow` reduz `blur`/`spread` por
+   bisseção até caber em `MAX_SHADOW_PIXELS = 4_000_000`. Além disso a máscara é
+   limitada ao clip, então uma caixa 5000×5000 num canvas 400×300 aloca a área
+   visível, não 50 MB — é o que o teste `huge_shadow_stays_within_budget`
+   exercita.
+2. **`blur` é o suporte total do blur, não o raio por passada.** Três passadas
+   com `radius = blur / 3` somam exatamente `blur` de cauda; usar `blur * 3` de
+   padding (como no plano) reservava o dobro da área e custava 190 ms em
+   `(100,50)`.
+3. **Custo do blur**: soma deslizante nas duas passadas (O(1) por pixel
+   independente do raio) e a passada vertical em ordem de linha, com somas por
+   coluna. A versão ingênua somava a janela por pixel e levava 192 ms.
+4. **O clamp não atua em `(100,50)` no `--bench-shadow`.** O plano previa que
+   `efetivo` fosse menor que `100,50`; com o padding correto (item 2) e a máscara
+   recortada, 300×300 + 2×(50+100) = 600×600 → 720 KB, dentro do teto de 4 MB.
+   O clamp é exercitado onde importa: `clamp_shadow_respects_the_total_allocation`
+   (blur 5000) e `huge_shadow_stays_within_budget` (caixa 5000×5000). O critério
+   do gate — alocação limitada e ≤ 8 ms — é cumprido; só a expectativa numérica
+   do exemplo do plano não se aplica.
+5. **`box-shadow` de caixa quadrada mantém cantos quadrados**: `spread` cresce a
+   forma, não a arredonda.
+6. **`border-radius: %` é resolvido em `Flow::block`** (e repetido em
+   `refresh_paint`, senão um restyle só de cor voltaria a quadrar a caixa).
+
+## Desvios e decisões de A4
+
+1. **`FontFace` substituiu `bold` na trait** e `TextRun` guarda
+   `family`/`weight`/`italic`. A família é internada com `Arc<str>` por linha:
+   um `String` por run custava uma alocação por run (medido: +0.4 ms de layout em
+   `rust-lang.org`, reduzido com a interning).
+2. **Resolução memoizada.** `FontSet` memoriza a última requisição (família,
+   peso, inclinação) → índice de família + flags de síntese, e a lista
+   `font-family` é dividida sem alocar. `font-family` desconhecida cai em
+   `sans-serif`; `serif`/`monospace` são famílias reais registradas de arquivos do
+   sistema, com fallback para o regular do sistema se o arquivo não existir.
+3. **Orçamento de fontes por documento, não por passada.** `prepare_fonts` roda
+   duas vezes (antes do layout provisório e depois dos scripts) e compartilha
+   `font_sync_downloads` (teto 2), `font_cache` e `registered_faces`. Falha de
+   download/decodificação é terminal para o documento: a URL fica `None` e nunca
+   é retentada, então um `@font-face` quebrado não gera uma tentativa por
+   restyle. O erro "limite de downloads" é emitido **uma vez** por documento.
+4. **Erros de fonte são adiados.** A primeira passada roda antes de a sessão JS
+   existir, e `self.js` é substituído ao iniciar a sessão; por isso os erros vão
+   para `pending_font_errors` e são anexados quando o documento termina.
+5. **`@font-face` deixou de contar como at-rule não suportada** — é a causa do
+   `at-rule` cair a zero no `p8` de rust-lang e de 116→103 no MDN.
+6. **`font:` shorthand** com peso numérico (`font: 700 24px Arial`) passou a
+   tratar `700` como peso; antes o token numérico era lido como tamanho.
 
 ## Desvios e decisões de A7
 
@@ -149,12 +246,14 @@ com a latência; as demais colunas são determinísticas).
 
 ### Páginas de referência (`--dump`, 1000 px de largura)
 
+Estado após o marco v0.3 (`at-rule` cai porque `@font-face` virou suporte):
+
 | Página | TITLE | STATUS | CSS | CONTENT_HEIGHT | JS ERROR |
 |---|---|---|---|---|---|
-| `https://example.com` | Example Domain | Idle | rules=4 invalid=0 | 820.60 | 0 |
-| `https://www.rust-lang.org` | Rust Programming Language | Idle | rules=2052 invalid=0 | 3968.98 | 0 |
-| `https://developer.mozilla.org/en-US/docs/Web/HTML` | HTML: HyperText Markup Language \| MDN | Idle | rules=427 invalid=10 | 16897.00 | 6 |
-| `https://www.google.com` | Google | Idle | rules=1276 invalid=0 | 487.90 | 8 |
+| `https://example.com` | Example Domain | Idle | rules=4 invalid=0 at-rule=0 | 820.60 | 0 |
+| `https://www.rust-lang.org` | Rust Programming Language | Idle | rules=2052 invalid=0 at-rule=0 | 3968.98 | 0 |
+| `https://developer.mozilla.org/en-US/docs/Web/HTML` | HTML: HyperText Markup Language \| MDN | Idle | rules=427 invalid=10 at-rule=103 | 16897.00 | 6 |
+| `https://www.google.com` | Google | Idle | rules≈1277 invalid=0 at-rule=35 | 487.90 | 8 |
 
 Google serve HTML e bundles diferentes a cada carga (`bytes html` variou
 212460–242048 no `--bench`, e as URLs dos scripts mudam a cada resposta): as linhas

@@ -18,3 +18,6 @@ target/
 # Roadmap A0: scratch e capturas reproduzíveis
 .tmp/
 reports/*.bmp
+
+# Roadmap v0.3: build de comparação do baseline
+target-base/

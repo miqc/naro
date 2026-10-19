@@ -23,6 +23,9 @@ pub struct FetchedPage {
     /// fetched off the UI thread together with the document so `set_html`
     /// never blocks on the network.
     pub images: Vec<(String, Vec<u8>)>,
+    /// Pre-fetched `@font-face` payloads, keyed by absolute URL. Same reason
+    /// as `images`: the engine should never block on the network to lay out.
+    pub fonts: Vec<(String, Vec<u8>)>,
 }
 
 /// One HTTP response, with the body still as bytes.
@@ -120,6 +123,7 @@ pub struct Csp {
     pub script_src: Option<Vec<String>>,
     pub style_src: Option<Vec<String>>,
     pub img_src: Option<Vec<String>>,
+    pub font_src: Option<Vec<String>>,
     /// `default-src`, the fallback for any directive not given.
     pub default_src: Option<Vec<String>>,
 }
@@ -146,6 +150,10 @@ impl Csp {
                     csp.img_src = Some(sources);
                     any = true;
                 }
+                "font-src" => {
+                    csp.font_src = Some(sources);
+                    any = true;
+                }
                 "default-src" => {
                     csp.default_src = Some(sources);
                     any = true;
@@ -169,6 +177,7 @@ impl Csp {
             "script" => self.script_src.as_ref().or(self.default_src.as_ref()),
             "style" => self.style_src.as_ref().or(self.default_src.as_ref()),
             "img" => self.img_src.as_ref().or(self.default_src.as_ref()),
+            "font" => self.font_src.as_ref().or(self.default_src.as_ref()),
             _ => self.default_src.as_ref(),
         };
         let Some(list) = list else { return true };
@@ -271,6 +280,10 @@ const MAX_IMAGES: usize = 12;
 const MAX_IMAGE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_SCRIPTS: usize = 8;
 const MAX_SCRIPT_BYTES: u64 = 512 * 1024;
+/// Web font budget per page. A page rarely needs more than two or three, and a
+/// subsetted WOFF2 is 20-80 KB, so six files and 4 MB each is generous.
+const MAX_FONTS: usize = 6;
+const MAX_FONT_BYTES: u64 = 4 * 1024 * 1024;
 /// Cache budget: a browsing session, not a proxy.
 const CACHE_MAX_BYTES: usize = 32 * 1024 * 1024;
 const CACHE_MAX_ENTRIES: usize = 200;
@@ -361,10 +374,12 @@ impl NetSession {
 
         let mut images = self.fetch_images(&final_url, &html, &mut blocked, &csp);
         images.extend(self.fetch_scripts(&final_url, &html, &mut blocked, &csp));
+        let fonts = self.fetch_fonts(&final_url, &html, &mut blocked, &csp);
         Ok(FetchedPage {
             url: final_url,
             html,
             images,
+            fonts,
             blocked,
             csp,
         })
@@ -387,10 +402,12 @@ impl NetSession {
         let html = self.inline_stylesheets(&final_url, &body, &mut blocked, &csp);
         let mut images = self.fetch_images(&final_url, &html, &mut blocked, &csp);
         images.extend(self.fetch_scripts(&final_url, &html, &mut blocked, &csp));
+        let fonts = self.fetch_fonts(&final_url, &html, &mut blocked, &csp);
         Ok(FetchedPage {
             url: final_url,
             html,
             images,
+            fonts,
             blocked,
             csp,
         })
@@ -735,6 +752,57 @@ impl NetSession {
                 continue;
             }
             if let Ok(bytes) = self.fetch_bytes(&url, MAX_IMAGE_BYTES) {
+                out.push((url, bytes));
+            }
+        }
+        out
+    }
+
+    /// Fetch the font files named by `@font-face`, up to `MAX_FONTS`.
+    ///
+    /// Runs after `inline_stylesheets`, so an external sheet's `@font-face` is
+    /// already inline and its `url()` shows up in the same scan `fetch_images`
+    /// uses. No second CSS parser: the extension of the URL decides whether it
+    /// is a font, which keeps `url(...)` handling in one place.
+    fn fetch_fonts(
+        &self,
+        base: &str,
+        html: &str,
+        blocked: &mut Vec<String>,
+        csp: &Option<Csp>,
+    ) -> Vec<(String, Vec<u8>)> {
+        let mut out: Vec<(String, Vec<u8>)> = Vec::new();
+        let mut seen: Vec<String> = Vec::new();
+        let mut i = 0usize;
+        while let Some(pos) = html[i..].find("url(") {
+            if out.len() >= MAX_FONTS {
+                break;
+            }
+            let start = i + pos + 4;
+            let Some(end) = html[start..].find(')') else { break };
+            let raw = html[start..start + end].trim().trim_matches(|c| c == '"' || c == '\'');
+            i = start + end + 1;
+            if raw.is_empty() || raw.starts_with("data:") {
+                continue;
+            }
+            // Extension check ignoring query and fragment. Only the raw sfnt
+            // formats: WOFF2/WOFF need a decompressor this build does not have
+            // (see `## Bloqueios`), so fetching them would spend the budget on
+            // bytes nothing can use.
+            let path = raw.split(['?', '#']).next().unwrap_or(raw).to_ascii_lowercase();
+            if !(path.ends_with(".ttf") || path.ends_with(".otf")) {
+                continue;
+            }
+            let Some(url) = resolve(base, raw) else { continue };
+            if seen.iter().any(|u| u == &url) {
+                continue;
+            }
+            seen.push(url.clone());
+            if !self.may_load(base, &url) || !Self::policy_allows(csp, "font", base, &url) {
+                blocked.push(url);
+                continue;
+            }
+            if let Ok(bytes) = self.fetch_bytes(&url, MAX_FONT_BYTES) {
                 out.push((url, bytes));
             }
         }

@@ -53,6 +53,13 @@ use naro_text::{FontSet, TextMeasure};
 pub const START_URL: &str = "naro://start";
 /// Images kept decoded per session; bounded so long browsing cannot grow it.
 const MAX_IMAGES: usize = 48;
+/// Synchronous font downloads per document. `naro-net` prefetches up to six
+/// `@font-face` files with the page; this covers the rest — a face that only
+/// appears after a script ran.
+const MAX_SYNC_FONTS_PER_DOCUMENT: u32 = 2;
+/// Retained web-font bytes per document. Mirrors `naro_net::MAX_FONT_BYTES`,
+/// which is private to that crate.
+const MAX_FONT_BYTES: usize = 4 * 1024 * 1024;
 
 pub const START_HTML: &str = r#"<!doctype html>
 <html><head><title>NARO — Início</title>
@@ -203,6 +210,22 @@ pub struct Engine {
     /// Last parsed `<style>` text, so a load or a restyle that did not change
     /// it does not parse the whole sheet again.
     sheet_cache: naro_css::SheetCache,
+    /// Font bytes per URL: `Some` = downloaded and decodable, `None` = failed.
+    /// Keeping the bytes lets two `@font-face` rules with the same `src`
+    /// register different families without a second download.
+    font_cache: HashMap<String, Option<Vec<u8>>>,
+    /// Faces already registered, keyed
+    /// `"{family}\u{1f}{weight}\u{1f}{italic}\u{1f}{url}"`.
+    registered_faces: std::collections::HashSet<String>,
+    /// Synchronous downloads made for the current document.
+    font_sync_downloads: u32,
+    /// The download ceiling was already reported for this document.
+    font_limit_reported: bool,
+    /// Font errors collected while the document is being built. The first
+    /// `prepare_fonts` pass runs *before* the JS session exists, and starting
+    /// the session replaces `self.js`; errors pushed there would be lost, so
+    /// they are held here and appended once the document is complete.
+    pending_font_errors: Vec<String>,
 }
 
 impl Engine {
@@ -237,6 +260,11 @@ impl Engine {
             select_open: None,
             selection: None,
             sheet_cache: naro_css::SheetCache::default(),
+            font_cache: HashMap::new(),
+            registered_faces: std::collections::HashSet::new(),
+            font_sync_downloads: 0,
+            font_limit_reported: false,
+            pending_font_errors: Vec::new(),
         };
         // Callers decide what to load; nothing is parsed or laid out here.
         engine.generation += 1;
@@ -298,6 +326,13 @@ impl Engine {
         self.js_session = None;
         self.focus = None;
         self.caret = 0;
+        // Font state belongs to the document: a new navigation starts with a
+        // full download budget and no remembered faces.
+        self.font_cache.clear();
+        self.registered_faces.clear();
+        self.font_sync_downloads = 0;
+        self.font_limit_reported = false;
+        self.pending_font_errors.clear();
         let generation = self.generation;
 
         if push_history {
@@ -354,7 +389,7 @@ impl Engine {
         }
         match result {
             Ok(page) => {
-                self.set_html_with_images(&page.url, &page.html, &page.images);
+                self.set_html_with_fonts(&page.url, &page.html, &page.images, &page.fonts);
                 if self.history_index < self.history.len() {
                     self.history[self.history_index] = page.url;
                 }
@@ -396,6 +431,17 @@ impl Engine {
         html: &str,
         resources: &[(String, Vec<u8>)],
     ) {
+        self.set_html_with_fonts(url, html, resources, &[])
+    }
+
+    /// `set_html_with_images` plus the font files `naro-net` prefetched.
+    pub fn set_html_with_fonts(
+        &mut self,
+        url: &str,
+        html: &str,
+        resources: &[(String, Vec<u8>)],
+        font_resources: &[(String, Vec<u8>)],
+    ) {
         let mut doc = Document::parse(html);
         // Absolutize resource URLs so the pre-fetched payloads (keyed by
         // absolute URL) can be matched back to their DOM nodes.
@@ -432,6 +478,10 @@ impl Engine {
         // Run document scripts against the live DOM before styling, so their
         // mutations are visible to the cascade and the layout.
         let scripts = collect_scripts(&doc, resources);
+        // Before the provisional layout: a script that measures text must
+        // already see the web face, or it measures with the fallback and every
+        // geometry it records is wrong.
+        self.prepare_fonts(&doc, url, font_resources);
         // Scripts that measure the page need a layout to measure. When the
         // document has scripts, build one from the parsed tree first; it is
         // thrown away once the scripts have run and the real cascade happens.
@@ -500,6 +550,8 @@ impl Engine {
             None => return,
         };
 
+        // A `@font-face` a load script injected is only visible now.
+        self.prepare_fonts(&doc, url, font_resources);
         let (styles, report) = compute_page_styles(
             &doc,
             url,
@@ -529,8 +581,156 @@ impl Engine {
         self.layout = Some(layout);
         self.doc = Some(doc);
         self.push_geometry();
+        // Font errors waited for the session to exist; they belong with the
+        // other load diagnostics.
+        self.js.errors.append(&mut self.pending_font_errors);
         // A fresh document starts fully built; nothing is pending.
         self.dirty.clear();
+    }
+
+    /// Register the `@font-face` files this document needs, before anything
+    /// measures or paints text.
+    ///
+    /// Runs twice per document (before the provisional layout and after the
+    /// load scripts), but every budget it keeps — `font_sync_downloads`,
+    /// `font_cache`, `registered_faces` — is per document, so the two passes
+    /// share one budget instead of getting two.
+    ///
+    /// A download or decode failure is **terminal for the document**: the URL
+    /// is remembered as `None` and never retried, so a broken `@font-face`
+    /// cannot cost one attempt per restyle. A new navigation clears the state
+    /// and tries again.
+    fn prepare_fonts(&mut self, doc: &Document, url: &str, prefetched: &[(String, Vec<u8>)]) {
+        let sheet = self
+            .sheet_cache
+            .parse(&doc.collect_style_text(), self.viewport_width);
+        if sheet.font_faces.is_empty() {
+            return;
+        }
+        for rule in &sheet.font_faces {
+            for src in &rule.srcs {
+                // A malformed URL is the page's problem, not a failure of ours:
+                // it counts against no budget and produces no error.
+                let Some(abs) = resolve(url, src) else { continue };
+                // Only http(s) can be fetched. A `file://` page naming a
+                // `file://` font is left to the system default instead of
+                // producing a download error for something we never fetch.
+                if !abs.starts_with("http://") && !abs.starts_with("https://") {
+                    continue;
+                }
+                // WOFF2 and WOFF need a decompressor this build lacks (see
+                // `## Bloqueios`). Most sites ship only those, so skipping them
+                // silently keeps the page's diagnostics about the page.
+                let lower = abs.to_ascii_lowercase();
+                let path = lower.split(['?', '#']).next().unwrap_or(&lower);
+                if path.ends_with(".woff2") || path.ends_with(".woff") {
+                    continue;
+                }
+                let key = format!(
+                    "{}\u{1f}{}\u{1f}{}\u{1f}{}",
+                    rule.family.to_lowercase(),
+                    rule.weight,
+                    rule.italic,
+                    abs
+                );
+                if self.registered_faces.contains(&key) {
+                    continue;
+                }
+                let bytes = match self.font_bytes_for(&abs, url, prefetched) {
+                    Some(bytes) => bytes,
+                    None => continue,
+                };
+                // WOFF2 cannot be decoded in this build (see `## Bloqueios`).
+                // Most sites ship WOFF2 only, so this is a build limitation and
+                // not a page error: the face is skipped without a diagnostic,
+                // and the text falls back to the next family in the list.
+                // WOFF (1.0) is a zlib-wrapped sfnt; decoding it needs a
+                // decompressor this build does not have either.
+                if bytes.starts_with(b"wOF2") || bytes.starts_with(b"wOFF") {
+                    self.registered_faces.insert(key);
+                    continue;
+                }
+                match self
+                    .fonts
+                    .register_web_family(&rule.family, rule.weight, rule.italic, bytes, &abs)
+                {
+                    Ok(()) => {}
+                    Err(message) => {
+                        self.pending_font_errors
+                            .push(format!("fonte {abs}: {message}"));
+                    }
+                }
+                // Recorded even on failure: an invalid face must not be
+                // re-registered on every restyle. The bytes stay cached, so
+                // another rule naming the same file still gets them.
+                self.registered_faces.insert(key);
+            }
+        }
+    }
+
+    /// The bytes for one font URL, or `None` when they are unavailable and the
+    /// caller should skip this face.
+    fn font_bytes_for(
+        &mut self,
+        abs: &str,
+        page_url: &str,
+        prefetched: &[(String, Vec<u8>)],
+    ) -> Option<Vec<u8>> {
+        // The prefetch already paid the network cost.
+        if let Some((_, bytes)) = prefetched.iter().find(|(u, _)| u == abs) {
+            self.font_cache.insert(abs.to_string(), Some(bytes.clone()));
+            return Some(bytes.clone());
+        }
+        match self.font_cache.get(abs) {
+            Some(Some(bytes)) => return Some(bytes.clone()),
+            // Already failed: no second download, no second error.
+            Some(None) => return None,
+            None => {}
+        }
+        if self.font_sync_downloads >= MAX_SYNC_FONTS_PER_DOCUMENT {
+            self.font_cache.insert(abs.to_string(), None);
+            // One diagnostic per document, not one per refused URL: a page
+            // with forty `@font-face` rules must not bury every other message.
+            if !self.font_limit_reported {
+                self.font_limit_reported = true;
+                self.pending_font_errors.push(
+                    "limite de downloads de fonte do documento atingido".to_string(),
+                );
+            }
+            return None;
+        }
+        self.font_sync_downloads += 1;
+        let allowed = naro_net::with_session(|net| Ok(net.may_load(page_url, abs)))
+            .unwrap_or(true);
+        if !allowed {
+            self.font_cache.insert(abs.to_string(), None);
+            self.pending_font_errors
+                .push(format!("fonte {abs}: bloqueada pela política de origem"));
+            return None;
+        }
+        let response = naro_net::with_session(|net| net.request("GET", abs, None, &[]));
+        let body = match response {
+            Err(e) => {
+                self.font_cache.insert(abs.to_string(), None);
+                self.pending_font_errors.push(format!("fonte {abs}: {e}"));
+                return None;
+            }
+            Ok(r) if r.status >= 400 => {
+                let status = r.status;
+                self.font_cache.insert(abs.to_string(), None);
+                self.pending_font_errors.push(format!("fonte {abs}: HTTP {status}"));
+                return None;
+            }
+            Ok(r) if r.body.len() > MAX_FONT_BYTES => {
+                self.font_cache.insert(abs.to_string(), None);
+                self.pending_font_errors
+                    .push(format!("fonte {abs}: arquivo grande demais"));
+                return None;
+            }
+            Ok(r) => r.body,
+        };
+        self.font_cache.insert(abs.to_string(), Some(body.clone()));
+        Some(body)
     }
 
     pub fn show_error(&mut self, url: &str, message: &str) {
@@ -600,8 +800,20 @@ p {{ margin: 8px 0; line-height: 1.5; }}
     /// `page_y` is in document coordinates (already includes the scroll offset).
     pub fn hit_link(&self, page_x: f32, page_y: f32) -> Option<String> {
         let layout = self.layout.as_ref()?;
+        let effective = match &self.doc {
+            Some(doc) => effective_transforms(doc, layout),
+            None => HashMap::new(),
+        };
         for link in &layout.links {
-            if link.rect.contains(page_x, page_y) {
+            // A translated `<a>` must be clickable where it is painted.
+            let hit = match effective.get(&link.node) {
+                Some(m) => m.inverse().is_some_and(|inv| {
+                    let (lx, ly) = inv.apply(page_x, page_y);
+                    link.rect.contains(lx, ly)
+                }),
+                None => link.rect.contains(page_x, page_y),
+            };
+            if hit {
                 return resolve(&self.display_url, &link.href);
             }
         }
@@ -626,9 +838,24 @@ p {{ margin: 8px 0; line-height: 1.5; }}
         };
 
         let scroll = self.scroll_y;
+        // One lookup table for paint and hit-testing: the same matrices, so
+        // the two can never disagree.
+        let effective = match &self.doc {
+            Some(doc) => effective_transforms(doc, layout),
+            None => HashMap::new(),
+        };
         // Blocks are pushed post-order (children before parents); painting in
         // reverse draws ancestors first so descendants stay on top.
         for block in layout.blocks.iter().rev() {
+            // The matrix lives in the layout and is the same one hit-testing
+            // inverts, so paint and click can never disagree.
+            let pushed = match effective.get(&block.node) {
+                Some(m) => {
+                    canvas.push_transform(*m);
+                    true
+                }
+                None => false,
+            };
             let y = block.rect.y - scroll + content.y;
             let x = block.rect.x + content.x;
             // `overflow: hidden/auto/scroll` clips the box to its ancestor clip.
@@ -641,34 +868,56 @@ p {{ margin: 8px 0; line-height: 1.5; }}
                 }),
                 None => canvas.set_clip(content),
             }
-            if let Some((dx, dy, blur, color)) = block.box_shadow {
-                // Approximate the blur with a few stacked translucent rects.
-                let steps = 3;
-                for i in 0..steps {
-                    let grow = blur * (i as f32 + 1.0) / steps as f32;
-                    let a = color.a / (steps + 1) as u8;
-                    canvas.fill_round_rect(
-                        x + dx - grow,
-                        y + dy - grow,
-                        block.rect.w + grow * 2.0,
-                        block.rect.h + grow * 2.0,
-                        block.border_radius + grow,
-                        Color { a, ..color },
+            if let Some(shadow) = &block.box_shadow {
+                // The mask is the expensive part: a box entirely below the
+                // fold would pay for a blur nobody sees. The box itself is
+                // still painted below; only the blurred mask is skipped.
+                let reach = shadow.spread + shadow.blur;
+                let shadow_rect = Rect {
+                    x: block.rect.x + shadow.dx - reach,
+                    y: block.rect.y + shadow.dy - reach,
+                    w: block.rect.w + reach * 2.0,
+                    h: block.rect.h + reach * 2.0,
+                };
+                let visible = Rect {
+                    x: content.x,
+                    y: scroll,
+                    w: content.w,
+                    h: content.h,
+                };
+                if intersects(shadow_rect, visible) {
+                    canvas.fill_shadow(
+                        x,
+                        y,
+                        block.rect.w,
+                        block.rect.h,
+                        block.border_radius,
+                        shadow,
                     );
                 }
             }
             if !block.paint {
+                // The transform must not leak onto the next block.
+                if pushed {
+                    canvas.pop_transform();
+                }
                 continue;
             }
-            if block.background.a > 0 {
-                canvas.fill_round_rect(
+            match &block.background_gradient {
+                // A gradient replaces the flat colour. It ignores
+                // `border_radius` (registered limitation).
+                Some(gradient) => {
+                    canvas.fill_gradient_rect(x, y, block.rect.w, block.rect.h, gradient)
+                }
+                None if block.background.a > 0 => canvas.fill_round_rect(
                     x,
                     y,
                     block.rect.w,
                     block.rect.h,
                     block.border_radius,
                     block.background,
-                );
+                ),
+                None => {}
             }
             if let Some(image) = &block.background_image {
                 canvas.draw_image(x, y, block.rect.w, block.rect.h, image);
@@ -697,6 +946,9 @@ p {{ margin: 8px 0; line-height: 1.5; }}
                     block.rect.h - b.top - b.bottom,
                     block.border_color,
                 );
+            }
+            if pushed {
+                canvas.pop_transform();
             }
         }
         canvas.set_clip(content);
@@ -755,13 +1007,31 @@ p {{ margin: 8px 0; line-height: 1.5; }}
             if y > content.y + content.h || y + image.rect.h < content.y {
                 continue;
             }
+            // `object-fit` decides which sub-rect of the element's box the
+            // image occupies; `fill` (the default) is the whole box.
+            let dest = fit_rect(
+                image.rect,
+                image.image.width as f32,
+                image.image.height as f32,
+                image.object_fit,
+            );
+            let pushed = match effective.get(&image.node) {
+                Some(m) => {
+                    canvas.push_transform(*m);
+                    true
+                }
+                None => false,
+            };
             canvas.draw_image(
-                image.rect.x + content.x,
-                y,
-                image.rect.w,
-                image.rect.h,
+                dest.x + content.x,
+                dest.y - scroll + content.y,
+                dest.w,
+                dest.h,
                 &image.image,
             );
+            if pushed {
+                canvas.pop_transform();
+            }
         }
 
         // Inline SVG sits on top of its box, in page coordinates.
@@ -795,6 +1065,13 @@ p {{ margin: 8px 0; line-height: 1.5; }}
             if !run.paint {
                 continue;
             }
+            let pushed = match effective.get(&run.node) {
+                Some(m) => {
+                    canvas.push_transform(*m);
+                    true
+                }
+                None => false,
+            };
             let baseline = run.baseline - scroll + content.y;
             if baseline < content.y - run.size * 2.0 || baseline > content.y + content.h + run.size * 2.0 {
                 continue;
@@ -806,11 +1083,16 @@ p {{ margin: 8px 0; line-height: 1.5; }}
                 &text,
                 run.size,
                 run.color,
-                run.bold,
+                naro_text::FontFace::new(&run.family, run.weight, run.italic),
                 &mut self.fonts,
             );
             if run.underline {
-                let width = naro_text::TextMeasure::measure(&self.fonts, &text, run.size, run.bold);
+                let width = naro_text::TextMeasure::measure(
+                    &self.fonts,
+                    &text,
+                    run.size,
+                    naro_text::FontFace::new(&run.family, run.weight, run.italic),
+                );
                 canvas.fill_rect(
                     run.x + content.x,
                     baseline + 1.5,
@@ -818,6 +1100,9 @@ p {{ margin: 8px 0; line-height: 1.5; }}
                     1.0,
                     run.color,
                 );
+            }
+            if pushed {
+                canvas.pop_transform();
             }
         }
         canvas.reset_clip();
@@ -842,7 +1127,11 @@ p {{ margin: 8px 0; line-height: 1.5; }}
                 continue;
             }
             let text = run.text(layout);
-            let width = self.fonts.measure(text, run.size, run.bold);
+            let width = self.fonts.measure(
+                text,
+                run.size,
+                naro_text::FontFace::new(&run.family, run.weight, run.italic),
+            );
             // Distance to the run's horizontal extent; a click to the right of
             // a line still lands at its end.
             let distance = if x < run.x {
@@ -865,7 +1154,11 @@ p {{ margin: 8px 0; line-height: 1.5; }}
         let mut best_delta = f32::INFINITY;
         for (offset, _) in text.char_indices().chain(std::iter::once((text.len(), '\0'))) {
             let prefix = &text[..offset];
-            let width = self.fonts.measure(prefix, run.size, run.bold);
+            let width = self.fonts.measure(
+                prefix,
+                run.size,
+                naro_text::FontFace::new(&run.family, run.weight, run.italic),
+            );
             let delta = (run.x + width - x).abs();
             if delta < best_delta {
                 best_delta = delta;
@@ -981,8 +1274,9 @@ p {{ margin: 8px 0; line-height: 1.5; }}
             if from == to {
                 continue;
             }
-            let x0 = run.x + self.fonts.measure(&text[..from], run.size, run.bold);
-            let x1 = run.x + self.fonts.measure(&text[..to], run.size, run.bold);
+            let face = naro_text::FontFace::new(&run.family, run.weight, run.italic);
+            let x0 = run.x + self.fonts.measure(&text[..from], run.size, face);
+            let x1 = run.x + self.fonts.measure(&text[..to], run.size, face);
             out.push(Rect {
                 x: x0,
                 y: run.baseline - run.size * 0.95,
@@ -996,12 +1290,24 @@ p {{ margin: 8px 0; line-height: 1.5; }}
     /// Deepest laid-out element under `(x, y)` in page coordinates.
     pub fn hit_node(&self, page_x: f32, page_y: f32) -> Option<usize> {
         let layout = self.layout.as_ref()?;
+        let effective = match &self.doc {
+            Some(doc) => effective_transforms(doc, layout),
+            None => HashMap::new(),
+        };
         let mut best: Option<&BlockBox> = None;
         for block in &layout.blocks {
             let area = block.rect.w * block.rect.h;
-            if block.rect.contains(page_x, page_y)
-                && best.map(|b| area < b.rect.w * b.rect.h).unwrap_or(true)
-            {
+            // The same matrix the painter used, inverted: a click lands where
+            // the box is drawn, not where layout put it. A singular matrix
+            // (`scale(0)`) is invisible and therefore not clickable.
+            let hit = match effective.get(&block.node) {
+                Some(m) => m.inverse().is_some_and(|inv| {
+                    let (lx, ly) = inv.apply(page_x, page_y);
+                    block.rect.contains(lx, ly)
+                }),
+                None => block.rect.contains(page_x, page_y),
+            };
+            if hit && best.map(|b| area < b.rect.w * b.rect.h).unwrap_or(true) {
                 best = Some(block);
             }
         }
@@ -2346,6 +2652,65 @@ pub fn normalize(url: &str) -> String {
     normalize_input(url)
 }
 
+/// Where an image of `iw x ih` goes inside `box` under `object-fit`.
+fn fit_rect(box_: Rect, iw: f32, ih: f32, fit: naro_css::ObjectFit) -> Rect {
+    use naro_css::ObjectFit;
+    if fit == ObjectFit::Fill || iw <= 0.0 || ih <= 0.0 || box_.w <= 0.0 || box_.h <= 0.0 {
+        return box_;
+    }
+    let scale_w = box_.w / iw;
+    let scale_h = box_.h / ih;
+    let contain = scale_w.min(scale_h);
+    let cover = scale_w.max(scale_h);
+    let scale = match fit {
+        ObjectFit::Contain => contain,
+        ObjectFit::Cover => cover,
+        ObjectFit::None => 1.0,
+        ObjectFit::ScaleDown => contain.min(1.0),
+        ObjectFit::Fill => 1.0,
+    };
+    let w = iw * scale;
+    let h = ih * scale;
+    Rect {
+        x: box_.x + (box_.w - w) / 2.0,
+        y: box_.y + (box_.h - h) / 2.0,
+        w,
+        h,
+    }
+}
+
+/// The matrix in effect for every node, inherited down the tree.
+///
+/// `layout.transforms` has one entry per *transformed element*; text runs,
+/// images and links are keyed by the node that produced them, which is often a
+/// text node or a nested element. Walking the tree once and propagating the
+/// nearest ancestor matrix gives every node the exact matrix the painter must
+/// use, without a second source of truth and without 24 bytes on every run.
+fn effective_transforms(
+    doc: &Document,
+    layout: &Layout,
+) -> HashMap<usize, naro_css::Affine> {
+    let mut out = HashMap::new();
+    if layout.transforms.is_empty() {
+        return out;
+    }
+    let mut stack: Vec<(usize, naro_css::Affine)> =
+        vec![(doc.root, naro_css::Affine::IDENTITY)];
+    while let Some((node, parent)) = stack.pop() {
+        let matrix = layout.transforms.get(&node).copied().unwrap_or(parent);
+        out.insert(node, matrix);
+        for &child in doc.children(node) {
+            stack.push((child, matrix));
+        }
+    }
+    out
+}
+
+/// Do two axis-aligned rects overlap?
+fn intersects(a: Rect, b: Rect) -> bool {
+    a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3389,6 +3754,247 @@ mod tests {
         assert_eq!(engine.scroll_y, engine.max_scroll());
     }
 
+    fn click_logs(engine: &mut Engine, x: f32, y: f32) -> Vec<String> {
+        let (outcome, _) = engine.click_at(x, y);
+        outcome.logs
+    }
+
+    fn transformed_page(body: &str, css: &str) -> Option<Engine> {
+        let mut engine = engine()?;
+        engine.set_viewport(1000.0, 700.0);
+        let html = format!(
+            "<html><head><style>body{{margin:0}}{css}</style></head><body>{body}\
+             <script>\
+             for (const el of document.querySelectorAll('[id]')) {{\
+               el.addEventListener('click', () => console.log('hit:' + el.id));\
+             }}\
+             </script></body></html>"
+        );
+        engine.set_html("https://a.test/", &html);
+        Some(engine)
+    }
+
+    #[test]
+    fn hit_testing_follows_a_translation() {
+        let mut engine = match transformed_page(
+            "<div id=\"b\">b</div>",
+            "#b{position:absolute;left:0;top:0;width:100px;height:100px;transform:translate(200px,0)}",
+        ) {
+            Some(e) => e,
+            None => return,
+        };
+        // Where it is painted: a hit.
+        assert!(click_logs(&mut engine, 250.0, 50.0).iter().any(|l| l.contains("hit:b")));
+        // Where layout put it: nothing.
+        assert!(!click_logs(&mut engine, 50.0, 50.0).iter().any(|l| l.contains("hit:b")));
+    }
+
+    #[test]
+    fn hit_testing_accumulates_the_parent_matrix() {
+        let mut engine = match transformed_page(
+            "<div id=\"p\"><div id=\"c\">c</div></div>",
+            "#p{position:absolute;left:0;top:0;width:200px;height:200px;transform:translate(100px,0)}\
+             #c{position:absolute;left:0;top:0;width:50px;height:50px;transform:translate(0,50px)}",
+        ) {
+            Some(e) => e,
+            None => return,
+        };
+        // The child is painted at (100, 50): parent's x plus its own y.
+        assert!(click_logs(&mut engine, 120.0, 70.0).iter().any(|l| l.contains("hit:c")));
+        // Its layout position is empty: using only the child's matrix would
+        // pass here, which is exactly the bug this case exists to catch.
+        assert!(!click_logs(&mut engine, 20.0, 70.0).iter().any(|l| l.contains("hit:c")));
+    }
+
+    #[test]
+    fn hit_link_follows_a_translation() {
+        let engine = match transformed_page(
+            "<a id=\"lk\" href=\"/x\">ir</a>",
+            "#lk{position:absolute;left:0;top:300px;display:block;width:60px;height:20px;\
+                 transform:translate(400px,0)}",
+        ) {
+            Some(e) => e,
+            None => return,
+        };
+        // `LinkBox` covers the link's *text*, not its block box, so the click
+        // lands inside the painted text: without the matrix the point would be
+        // far to the right of it and resolve to nothing.
+        assert_eq!(engine.hit_link(403.0, 310.0).as_deref(), Some("https://a.test/x"));
+        assert_eq!(engine.hit_link(3.0, 310.0), None, "texto está em 400..407");
+        assert_eq!(engine.hit_link(30.0, 310.0), None);
+    }
+
+    #[test]
+    fn mirrored_transform_hits_and_singular_does_not() {
+        let mut engine = match transformed_page(
+            "<div id=\"m\">m</div><div id=\"z\">z</div>",
+            // Origin at the left edge, so the mirror maps the box onto
+            // x in [-100, 0] instead of onto itself.
+            "#m{position:absolute;left:0;top:500px;width:100px;height:100px;\
+                 transform:scale(-1,1);transform-origin:left center}\
+             #z{position:absolute;left:0;top:700px;width:100px;height:100px;transform:scale(0)}",
+        ) {
+            Some(e) => e,
+            None => return,
+        };
+        // Mirrored across x = 0, so the box paints at x in [-100, 0]. A click
+        // cannot have a negative page coordinate, so the hit test is checked
+        // directly for the painted half and through a click for the other.
+        let mirrored = engine
+            .doc
+            .as_ref()
+            .and_then(|d| naro_css::query_selector(d, "#m"))
+            .expect("nó m");
+        assert_eq!(engine.hit_node(-50.0, 550.0), Some(mirrored));
+        assert!(!click_logs(&mut engine, 50.0, 550.0).iter().any(|l| l.contains("hit:m")));
+        // `scale(0)` is invisible, so it is not clickable anywhere.
+        let mut x = 0;
+        while x <= 100 {
+            let mut y = 700;
+            while y <= 800 {
+                assert_ne!(engine.hit_node(x as f32, y as f32), Some(
+                    engine
+                        .doc
+                        .as_ref()
+                        .and_then(|d| naro_css::query_selector(d, "#z"))
+                        .unwrap()
+                ));
+                y += 10;
+            }
+            x += 10;
+        }
+    }
+
+    #[test]
+    fn restyling_transform_rebuilds_the_matrix() {
+        let mut engine = match transformed_page(
+            "<div id=\"t\">x</div>",
+            "#t{position:absolute;left:0;top:0;width:50px;height:50px}",
+        ) {
+            Some(e) => e,
+            None => return,
+        };
+        let before = engine.relayout_count;
+        let node = engine
+            .doc
+            .as_ref()
+            .and_then(|d| naro_css::query_selector(d, "#t"))
+            .expect("nó");
+        // Through the live realm, which is what a `style` assignment from a
+        // script ends up doing.
+        if let Some(session) = &engine.js_session {
+            session.set_attribute(node, "style", "transform: translate(200px,0)");
+        }
+        engine.dirty.mark_style();
+        engine.flush();
+        assert!(engine.relayout_count > before, "relayout não aconteceu");
+        let layout = engine.layout.as_ref().unwrap();
+        let m = layout.transforms.get(&node).expect("matriz nova");
+        assert!((m.apply(0.0, 0.0).0 - 200.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn shadows_below_the_fold_are_skipped() {
+        // Fifty blocks with a large shadow, all far below the viewport. The
+        // mask is the expensive part and none of it is visible, so nothing is
+        // built — proved by the counter, not by a stopwatch.
+        let mut page = String::from(
+            "<html><body style=\"margin:0\">\
+             <div style=\"height:5000px\"></div>",
+        );
+        for _ in 0..50 {
+            page.push_str(
+                "<div style=\"height:20px;box-shadow:0 0 20px 10px #000000\">x</div>",
+            );
+        }
+        page.push_str("</body></html>");
+
+        let mut engine = match engine() {
+            Some(e) => e,
+            None => return,
+        };
+        engine.set_viewport(1000.0, 700.0);
+        engine.set_html("https://a.test/", &page);
+        let mut pixels = vec![0u32; 1000 * 700];
+        let mut canvas = Canvas::new(&mut pixels, 1000, 700, 1.0);
+        canvas.clear(Color::WHITE);
+        engine.paint_page(&mut canvas, Rect { x: 0.0, y: 0.0, w: 1000.0, h: 700.0 });
+        assert_eq!(canvas.shadows_painted, 0, "sombra paga fora da tela");
+
+        // The same blocks at the top of the page do pay.
+        let mut top = String::from("<html><body style=\"margin:0\">");
+        for _ in 0..50 {
+            top.push_str(
+                "<div style=\"height:20px;box-shadow:0 0 20px 10px #000000\">x</div>",
+            );
+        }
+        top.push_str("</body></html>");
+        engine.set_html("https://a.test/", &top);
+        let mut pixels = vec![0u32; 1000 * 700];
+        let mut canvas = Canvas::new(&mut pixels, 1000, 700, 1.0);
+        canvas.clear(Color::WHITE);
+        engine.paint_page(&mut canvas, Rect { x: 0.0, y: 0.0, w: 1000.0, h: 700.0 });
+        assert!(canvas.shadows_painted > 0, "sombra visível não foi pintada");
+    }
+
+    #[test]
+    fn font_download_budget_is_per_document() {
+        // Three `@font-face` URLs on a port nothing listens on: the connection
+        // is refused immediately, so the test is deterministic and offline.
+        let html = "<html><head><style>\
+            @font-face { font-family: A; src: url(https://127.0.0.1:1/a.ttf); }\
+            @font-face { font-family: B; src: url(https://127.0.0.1:1/b.ttf); }\
+            @font-face { font-family: C; src: url(https://127.0.0.1:1/c.ttf); }\
+            </style></head><body><p style=\"font-family:A\">x</p></body></html>";
+        let mut engine = match engine() {
+            Some(e) => e,
+            None => return,
+        };
+        engine.set_html("https://127.0.0.1:1/", html);
+        // The ceiling, not three: `prepare_fonts` runs twice per document and
+        // the budget is the document's.
+        assert_eq!(engine.font_sync_downloads, MAX_SYNC_FONTS_PER_DOCUMENT);
+        assert_eq!(engine.font_cache.len(), 3);
+        assert!(engine.font_cache.values().all(|v| v.is_none()));
+        let limit_errors = engine
+            .js
+            .errors
+            .iter()
+            .filter(|e| e.contains("limite de downloads"))
+            .count();
+        assert_eq!(limit_errors, 1, "erros: {:?}", engine.js.errors);
+
+        // A second explicit pass changes neither the counter nor the errors.
+        let errors_before = engine.js.errors.len();
+        let downloads_before = engine.font_sync_downloads;
+        let doc = engine.doc.as_ref().unwrap();
+        let url = engine.display_url.clone();
+        engine.prepare_fonts(&doc.clone(), &url, &[]);
+        assert_eq!(engine.font_sync_downloads, downloads_before);
+        assert_eq!(engine.js.errors.len(), errors_before);
+    }
+
+    #[test]
+    fn font_failure_is_terminal_for_the_document() {
+        let html = "<html><head><style>\
+            @font-face { font-family: A; src: url(https://127.0.0.1:1/a.ttf); }\
+            </style></head><body><p style=\"font-family:A\">x</p></body></html>";
+        let mut engine = match engine() {
+            Some(e) => e,
+            None => return,
+        };
+        engine.set_html("https://127.0.0.1:1/", html);
+        assert_eq!(engine.font_cache.len(), 1);
+        let errors = engine.js.errors.len();
+        // A restyle must not retry the download or repeat the error.
+        engine.dirty.mark_style();
+        engine.flush();
+        assert_eq!(engine.restyle_count, 1);
+        assert_eq!(engine.font_cache.len(), 1);
+        assert_eq!(engine.js.errors.len(), errors);
+        assert_eq!(engine.font_sync_downloads, 1);
+    }
+
     #[test]
     fn painting_changes_pixels() {
         let mut engine = match engine() {
@@ -3402,4 +4008,3 @@ mod tests {
         assert!(canvas.pixels.iter().any(|p| *p != 0x00FF_FFFF));
     }
 }
-

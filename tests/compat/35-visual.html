@@ -1,0 +1,22 @@
+<!doctype html>
+<html><head><title>35 Visual</title><style>
+body { margin: 0; background-color: #ffffff; }
+div { position: absolute; }
+#grad { left: 0; top: 0; width: 200px; height: 100px;
+        background: linear-gradient(to right, #000000, #ffffff); }
+#rad  { left: 300px; top: 0; width: 200px; height: 100px;
+        background: radial-gradient(circle at 50% 50%, #ffffff, #000000); }
+#sh   { left: 0; top: 200px; width: 100px; height: 50px;
+        background: #ffffff; box-shadow: 0 0 0 10px #000000; }
+#circ { left: 300px; top: 200px; width: 100px; height: 100px;
+        background: #ff0000; border-radius: 50%; }
+</style></head><body>
+<div id="grad"></div>
+<div id="rad"></div>
+<div id="sh"></div>
+<div id="circ"></div>
+<script>
+const cs = (id) => getComputedStyle(document.getElementById(id));
+console.log("circ.r=" + cs("circ").borderRadius);
+console.log("sh.bg=" + cs("sh").backgroundColor);
+</script></body></html>

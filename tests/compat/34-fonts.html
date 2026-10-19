@@ -1,0 +1,19 @@
+<!doctype html>
+<html><head><title>34 Fontes</title><style>
+@font-face { font-family: "Naro Fixture"; src: url(assets/fixture.ttf) format("truetype"); }
+body { margin: 0; font-size: 16px; }
+#fix { font-family: "Naro Fixture", sans-serif; }
+#mono { font-family: monospace; }
+#sans { font-family: sans-serif; }
+#bold { font-family: monospace; font-weight: 700; }
+span { display: inline-block; }
+</style></head><body>
+<p id="fix">Fonte web carregada</p>
+<span id="mono">MMMM</span><span id="sans">MMMM</span>
+<p id="bold">Negrito sintetizado</p>
+<script>
+const cs = (id) => getComputedStyle(document.getElementById(id));
+console.log("ff=" + cs("mono").fontFamily);
+console.log("fw=" + cs("bold").fontWeight);
+console.log("fx=" + cs("fix").fontFamily);
+</script></body></html>
