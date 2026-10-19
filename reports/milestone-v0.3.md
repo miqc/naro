@@ -10,7 +10,7 @@ do MinGW UCRT com separador `;`. Raiz `C:/Users/Mica/Documents/GitHub/naro`.
 | v0.2 (partida) | 235 / 0 | 30 / 0 / 3 (33) | 32 / 0 / 1 (33) |
 | A4 | 251 / 0 | **30 / 0 / 4** (34) | **33 / 0 / 1** (34) |
 | A5a | 268 / 0 | **31 / 0 / 4** (35) | **34 / 0 / 1** (35) |
-| A5b | 289 / 0 | **32 / 0 / 4** (36) | **35 / 0 / 1** (36) |
+| A5b | 290 / 0 | **32 / 0 / 4** (36) | **35 / 0 / 1** (36) |
 
 `14-form.html` continua o único `UNSUP` em `--serve`; em `file://` os não
 suportados são `14-form`, `30-net`, `33-origin` e `34-fonts`, todos por exigirem
@@ -80,7 +80,7 @@ registrada acima. O clamp **não** atuou nesse par — ver "Desvios", item 4.
 | `transform` | `translate(X/Y)`, `scale(X/Y)`, `rotate(deg/rad)`; composição `A·B·C` da esquerda para a direita |
 | `transform-origin` | palavras-chave e `%`; `0`/`0px` exatos |
 | Herança de matriz | filho acumula a matriz do pai (uma matriz por nó em `Layout::transforms`) |
-| Pintura sob transformação | retângulo/arredondado por mapeamento inverso com supersampling só nas bordas; imagem bilinear; texto pixel a pixel |
+| Pintura sob transformação | retângulo/arredondado por mapeamento inverso com supersampling só nas bordas; imagem bilinear; texto com deslocamento de pena quando a matriz é translação+escala, mapeamento pixel a pixel em rotação/cisalhamento |
 | Hit-testing | inversa da **mesma** matriz da pintura, para bloco e para link |
 | `scale(0)` | invisível e não clicável |
 | `object-fit` | `fill`/`contain`/`cover`/`none`/`scale-down` |

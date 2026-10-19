@@ -890,46 +890,27 @@ impl<'a> Canvas<'a> {
         if color.a == 0 || size <= 0.0 {
             return;
         }
-        let scale = self.scale;
-        let px = (size * scale).round().max(1.0);
-        let mut pen_x = x * scale;
-        let baseline_px = baseline * scale;
+        let m = self.current();
         let d = self.device_matrix();
-        let transformed = !d.is_translation_scale();
+        // A pure translation (or a uniform positive scale) keeps the glyph
+        // bitmap and only moves the pen, so the fast path stays. Anything with
+        // a rotation, a shear or a mirror maps the coverage pixels instead.
+        let linear = m.is_translation_scale() && (m.a - m.d).abs() < 1e-6;
+        let (mut pen_x, baseline_px, px) = if linear {
+            let (ox, oy) = d.apply(x, baseline);
+            (ox, oy, (size * self.scale * m.a).round().max(1.0))
+        } else {
+            (x * self.scale, baseline * self.scale, (size * self.scale).round().max(1.0))
+        };
         for ch in text.chars() {
             let glyph = fonts.glyph(ch, px, face);
-            let m = glyph.metrics;
-            if m.width > 0 && m.height > 0 {
-                let gx = pen_x as i32 + m.xmin;
-                let gy = baseline_px as i32 + m.ymin;
-                let gw = m.width as i32;
-                let gh = m.height as i32;
-                if transformed {
-                    // Map every coverage pixel through the matrix instead of
-                    // blitting an offscreen buffer: exact for any affine,
-                    // including a shear, and it allocates nothing. A rotated
-                    // glyph loses its edge antialiasing (1x point sampling).
-                    if d.inverse().is_some() {
-                        for row in 0..gh {
-                            for col in 0..gw {
-                                let cov = glyph.bitmap[(row * gw + col) as usize];
-                                if cov == 0 {
-                                    continue;
-                                }
-                                let (dx, dy) = d.apply(
-                                    (gx + col) as f32 + 0.5,
-                                    (gy + row) as f32 + 0.5,
-                                );
-                                self.blend_at(
-                                    dx.floor() as i32,
-                                    dy.floor() as i32,
-                                    color,
-                                    cov,
-                                );
-                            }
-                        }
-                    }
-                } else {
+            let m_metrics = glyph.metrics;
+            if m_metrics.width > 0 && m_metrics.height > 0 {
+                let gx = pen_x as i32 + m_metrics.xmin;
+                let gy = baseline_px as i32 + m_metrics.ymin;
+                let gw = m_metrics.width as i32;
+                let gh = m_metrics.height as i32;
+                if linear {
                     for row in 0..gh {
                         for col in 0..gw {
                             let cov = glyph.bitmap[(row * gw + col) as usize];
@@ -938,9 +919,25 @@ impl<'a> Canvas<'a> {
                             }
                         }
                     }
+                } else if d.inverse().is_some() {
+                    // Map every coverage pixel through the matrix instead of
+                    // blitting an offscreen buffer: exact for any affine,
+                    // including a shear, and it allocates nothing. A rotated
+                    // glyph loses its edge antialiasing (1x point sampling).
+                    for row in 0..gh {
+                        for col in 0..gw {
+                            let cov = glyph.bitmap[(row * gw + col) as usize];
+                            if cov == 0 {
+                                continue;
+                            }
+                            let (dx, dy) =
+                                d.apply((gx + col) as f32 + 0.5, (gy + row) as f32 + 0.5);
+                            self.blend_at(dx.floor() as i32, dy.floor() as i32, color, cov);
+                        }
+                    }
                 }
             }
-            pen_x += m.advance_width;
+            pen_x += m_metrics.advance_width;
         }
     }
 
@@ -1414,5 +1411,45 @@ mod tests {
         assert_eq!(at(25, 5), 0xFF0000, "20 px de dispositivo");
         assert_eq!(at(5, 5), 0xFFFFFF);
         assert_eq!(at(45, 5), 0xFFFFFF, "não 40 px");
+    }
+
+    #[test]
+    fn translated_text_paints_at_the_translated_position() {
+        // A translated run must move with its box: the fast path used to ignore
+        // the matrix and paint the glyph at the layout position.
+        let Ok(mut fonts) = naro_text::FontSet::load_system() else { return };
+        let mut plain = vec![0u32; 300 * 60];
+        let mut canvas = Canvas::new(&mut plain, 300, 60, 1.0);
+        canvas.clear(Color::WHITE);
+        canvas.draw_text(
+            0.0,
+            30.0,
+            "II",
+            24.0,
+            Color::BLACK,
+            naro_text::FontFace::default(),
+            &mut fonts,
+        );
+        let plain_ink = canvas.pixels.iter().filter(|p| **p != 0x00FF_FFFF).count();
+
+        let mut moved = vec![0u32; 300 * 60];
+        let mut canvas = Canvas::new(&mut moved, 300, 60, 1.0);
+        canvas.clear(Color::WHITE);
+        canvas.push_transform(naro_css::Affine::translate(200.0, 0.0));
+        canvas.draw_text(
+            0.0,
+            30.0,
+            "II",
+            24.0,
+            Color::BLACK,
+            naro_text::FontFace::default(),
+            &mut fonts,
+        );
+        canvas.pop_transform();
+        // Nothing at the layout position, and the same amount of ink overall.
+        assert!(canvas.pixels[..200].iter().all(|p| *p == 0x00FF_FFFF));
+        let moved_ink = canvas.pixels.iter().filter(|p| **p != 0x00FF_FFFF).count();
+        assert!(plain_ink > 0);
+        assert_eq!(plain_ink, moved_ink);
     }
 }

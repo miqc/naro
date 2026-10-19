@@ -15,7 +15,7 @@ Marco em execução: **v0.3** concluído (fases A4, A5a, A5b). Plano:
 | Marco v0.2 | concluída | `reports/milestone-v0.2.md`; tag `milestone-v0.2` | 1 | execução aprovada encerrada |
 | A4 | concluída | tag `phase-a4`; `251 passed / 0 failed`; `--compat` **30 / 0 / 4** (34) e `--compat --serve` **33 / 0 / 1**; `34-fonts.html` prova `font-family`, `font-weight`, `@font-face` de um TTF commitado e a síntese de negrito (`ff=monospace`, `fw=700`, `fx=Naro Fixture, sans-serif`, `runfont:`, `boxdiff:`); 4 páginas de referência com `JS ERROR` e `CONTENT_HEIGHT` idênticos; `p8-rust-v03` difere em 2 hunks (at-rule 45→0, baseline de 96 px em 0.7 px) | 1 | WOFF2 bloqueado, ver abaixo |
 | A5a | concluída | tag `phase-a5a`; `268 passed / 0 failed`; `--compat` **31 / 0 / 4** (35) e `--compat --serve` **34 / 0 / 1**; `35-visual.html` com 8 `pixel:` (gradiente linear e radial, sombra com spread, círculo de raio percentual); `--bench-shadow 20` mede `(100,50)` em **6.98 ms** contra orçamento de 8 ms | 1 | ver desvios abaixo |
-| A5b | concluída | tag `phase-a5b`; `289 passed / 0 failed`; `--compat` **32 / 0 / 4** (36) e `--compat --serve` **35 / 0 / 1**; `36-transform.html` com 8 `pixel:`, `box:` provando layout intocado e `hit:`/`nothit:` provando o clique na posição pintada; testes de matriz pai→filho, espelho e `scale(0)` | 1 | ver desvios abaixo |
+| A5b | concluída | tag `phase-a5b`; `290 passed / 0 failed`; `--compat` **32 / 0 / 4** (36) e `--compat --serve` **35 / 0 / 1**; `36-transform.html` com 8 `pixel:`, `box:` provando layout intocado e `hit:`/`nothit:` provando o clique na posição pintada; testes de matriz pai→filho, espelho e `scale(0)` | 1 | ver desvios abaixo |
 | Marco v0.3 | concluída | `reports/milestone-v0.3.md`; tag `milestone-v0.3` | 1 | A5c, A6, A8 e A9 aguardam autorização |
 
 ## Próxima ação
@@ -62,7 +62,13 @@ vier.
    (`restyling_transform_rebuilds_the_matrix`).
 4. **`LinkBox` ganhou `node`** para que `hit_link` aplique a matriz do `<a>`. Sem
    isso um link deslocado seria clicável na posição de layout.
-5. **Ordem de pintura do `body`**: um filho absoluto é pintado antes da caixa do
+5. **Texto sob translação usa o caminho direto.** `draw_text` desloca a pena
+   quando a matriz é translação com escala uniforme positiva — o glifo mantém o
+   antialiasing e o custo — e só mapeia pixel a pixel em rotação, cisalhamento
+   ou espelho. A prova visual do `--render` de `36-transform.html` mostrou o
+   `<a>` deslocado com o texto parado na posição de layout; há teste de
+   regressão (`translated_text_paints_at_the_translated_position`).
+6. **Ordem de pintura do `body`**: um filho absoluto é pintado antes da caixa do
    ancestral (comportamento pré-existente), então o fixture usa `body`
    transparente. Registrado como limitação, não como mudança de critério.
 
