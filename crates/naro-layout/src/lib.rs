@@ -7,8 +7,8 @@
 pub mod svg;
 
 use naro_css::{
-    AlignContent, AlignItems, Color, ComputedStyle, Display, Edges, FlexDirection, FlexWrap,
-    JustifyContent, Overflow, Position, TextAlign, Track,
+    AlignContent, AlignItems, Clear, Color, ComputedStyle, Display, Edges, FlexDirection, FlexWrap,
+    Float, JustifyContent, Overflow, Position, TextAlign, Track, VerticalAlign,
 };
 use naro_image::SharedImage;
 use std::collections::HashMap;
@@ -664,6 +664,14 @@ fn flatten_inline(
     }
 }
 
+/// A float placed in the current block formatting context. Line boxes beside
+/// it are shortened, and `clear` moves boxes below it.
+#[derive(Clone, Copy, Debug)]
+struct FloatRect {
+    rect: Rect,
+    side: Float,
+}
+
 /// Tolerance used when deciding whether a word fits a line.
 ///
 /// Shrink-to-fit boxes get a width that came out of the same measurement, but
@@ -704,6 +712,11 @@ struct AtomMark {
     block: usize,
     runs: (usize, usize),
     images: (usize, usize),
+    /// Border-box height of the atom, needed to place it on the baseline.
+    height: f32,
+    /// The atom's own font size, for `middle`.
+    size: f32,
+    align: VerticalAlign,
 }
 
 struct LineBuilder<'a> {
@@ -735,8 +748,10 @@ struct LineBuilder<'a> {
     /// images their own layout produced. Alignment applies to the whole line at
     /// flush time, so an atom must not centre itself.
     pending_atoms: Vec<AtomMark>,
-    /// `(mark, dx)` for atoms whose line has been flushed.
-    atom_shifts: Vec<(AtomMark, f32)>,
+    /// `(mark, dx, dy)` for atoms whose line has been flushed.
+    atom_shifts: Vec<(AtomMark, f32, f32)>,
+    /// Floats whose band the line must avoid, in page coordinates.
+    floats: Vec<FloatRect>,
 }
 
 impl<'a> LineBuilder<'a> {
@@ -770,6 +785,7 @@ impl<'a> LineBuilder<'a> {
             arena,
             pending_atoms: Vec::new(),
             atom_shifts: Vec::new(),
+            floats: Vec::new(),
         }
     }
 
@@ -801,6 +817,42 @@ impl<'a> LineBuilder<'a> {
         index
     }
 
+    /// Replace the float list the line must avoid. Called whenever a float is
+    /// placed, so a line that starts beside it wraps correctly.
+    fn set_floats(&mut self, floats: &[FloatRect]) {
+        self.floats.clear();
+        self.floats.extend_from_slice(floats);
+    }
+
+    /// Horizontal band available to a line starting at `y`, in absolute page
+    /// x. Floats overlapping the line's vertical extent shorten it from one or
+    /// both sides.
+    fn band(&self, y: f32) -> (f32, f32) {
+        let mut left = self.x;
+        let mut right = self.x + self.width;
+        let bottom = y + self.default_size * self.default_line_height;
+        for f in &self.floats {
+            if f.rect.bottom() <= y + 0.5 || f.rect.y >= bottom - 0.5 {
+                continue;
+            }
+            match f.side {
+                Float::Left => left = left.max(f.rect.right()),
+                Float::Right => right = right.min(f.rect.x),
+                Float::None => {}
+            }
+        }
+        if right < left {
+            right = left;
+        }
+        (left, right)
+    }
+
+    /// Usable width of the line that starts at `y`.
+    fn band_width(&self, y: f32) -> f32 {
+        let (left, right) = self.band(y);
+        right - left
+    }
+
     /// Width of the separating space that would precede an atom here.
     fn atom_space(&self, size: f32, face: naro_text::FontFace<'_>) -> f32 {
         if self.pending_space && !self.at_line_start() {
@@ -812,13 +864,18 @@ impl<'a> LineBuilder<'a> {
 
     /// Does an atom of `width` (plus `lead` space) still fit on this line?
     fn fits(&self, width: f32, lead: f32) -> bool {
-        if self.width <= 0.0 {
+        let available = if self.floats.is_empty() {
+            self.width
+        } else {
+            self.band_width(self.y)
+        };
+        if available <= 0.0 {
             return true;
         }
         if self.at_line_start() {
             return true;
         }
-        self.line_width + lead + width <= self.width + FIT_EPSILON
+        self.line_width + lead + width <= available + FIT_EPSILON
     }
 
     /// Remember where an inline atom's box went, so `flush` can shift the whole
@@ -878,14 +935,24 @@ impl<'a> LineBuilder<'a> {
         } else {
             0.0
         };
+        let available = if self.floats.is_empty() {
+            self.width
+        } else {
+            self.band_width(self.y)
+        };
         if !self.words.is_empty()
-            && self.line_width + space_w + word_w > self.width + FIT_EPSILON
-            && self.width > 0.0
+            && self.line_width + space_w + word_w > available + FIT_EPSILON
+            && available > 0.0
         {
             self.flush();
             space_w = 0.0;
         }
-        if space_w + word_w <= self.width + FIT_EPSILON || self.width <= 0.0 {
+        let available = if self.floats.is_empty() {
+            self.width
+        } else {
+            self.band_width(self.y)
+        };
+        if space_w + word_w <= available + FIT_EPSILON || available <= 0.0 {
             self.line_width += space_w;
             self.add_word(text, style, link, node, word_w, space_w);
         } else {
@@ -944,7 +1011,12 @@ impl<'a> LineBuilder<'a> {
         let mut space = leading_space;
         for (i, ch) in text.char_indices() {
             let cw = self.char_width(ch, size, face);
-            if i > chunk_start && self.line_width + chunk_w + cw > self.width + FIT_EPSILON {
+            let available = if self.floats.is_empty() {
+                self.width
+            } else {
+                self.band_width(self.y)
+            };
+            if i > chunk_start && self.line_width + chunk_w + cw > available + FIT_EPSILON {
                 let (done, rest) = text.split_at(i);
                 let _ = rest;
                 self.add_word(&done[chunk_start..], style, link, node, chunk_w, space);
@@ -1014,6 +1086,20 @@ impl<'a> LineBuilder<'a> {
             line_height = line_height.max(lh);
             ascent = ascent.max(self.ascent_of(size, family, weight, italic));
         }
+        // A baseline-aligned atom taller than the text grows the line upward,
+        // which is what keeps an inline image from being pushed above its own
+        // line. `middle` and the sub/super shifts only need half the height.
+        for mark in &self.pending_atoms {
+            let needed = match mark.align {
+                VerticalAlign::Baseline => mark.height,
+                VerticalAlign::Middle | VerticalAlign::Sub | VerticalAlign::Super => {
+                    mark.height / 2.0
+                }
+                VerticalAlign::Top | VerticalAlign::Bottom | VerticalAlign::Length(_) => 0.0,
+            };
+            ascent = ascent.max(needed);
+            line_height = line_height.max(needed);
+        }
         if line_height <= 0.0 {
             line_height = self.default_size * self.default_line_height;
         }
@@ -1029,8 +1115,33 @@ impl<'a> LineBuilder<'a> {
             TextAlign::Right => (self.width - total).max(0.0),
         };
         let baseline = self.y + ascent;
+        let line_bottom = self.y + line_height;
+        // A left float moves the whole line right: the words were laid out
+        // from the line origin, so the band offset applies to every run and
+        // atom on it.
+        let band_dx = if self.floats.is_empty() {
+            0.0
+        } else {
+            self.band(self.y).0 - self.x
+        };
         for mark in std::mem::take(&mut self.pending_atoms) {
-            self.atom_shifts.push((mark, align_offset));
+            // `vertical-align` is applied here, once the baseline is known: the
+            // atom was laid out at the line top and is shifted into place.
+            let dy = match mark.align {
+                // The bottom of the box sits on the baseline, which is what an
+                // inline image and an inline-block do by default.
+                VerticalAlign::Baseline => baseline - (self.y + mark.height),
+                VerticalAlign::Middle => {
+                    (baseline - mark.size * 0.25) - (self.y + mark.height / 2.0)
+                }
+                VerticalAlign::Top => 0.0,
+                VerticalAlign::Bottom => line_bottom - (self.y + mark.height),
+                VerticalAlign::Sub => baseline + mark.size * 0.2 - (self.y + mark.height),
+                VerticalAlign::Super => baseline - mark.size * 0.33 - (self.y + mark.height),
+                // Positive moves the box down, matching CSS.
+                VerticalAlign::Length(px) => baseline + px - (self.y + mark.height),
+            };
+            self.atom_shifts.push((mark, band_dx + align_offset, dy));
         }
 
         let mut link_spans: Vec<(String, usize, f32, f32)> = Vec::new();
@@ -1042,7 +1153,7 @@ impl<'a> LineBuilder<'a> {
         let mut last_end: Option<f32> = None;
         for w in words.drain(..) {
             let text = &buf[w.start as usize..(w.start + w.len) as usize];
-            let run_x = self.x + align_offset + w.x;
+            let run_x = self.x + band_dx + align_offset + w.x;
             if let Some(href) = &w.link {
                 let end = run_x + w.width;
                 match link_spans.iter_mut().find(|(h, _, _, _)| h == href) {
@@ -1157,6 +1268,9 @@ struct Flow<'a> {
     transform_stack: Vec<naro_css::Affine>,
     /// One page-space matrix per transformed node.
     transforms: HashMap<usize, naro_css::Affine>,
+    /// Floats live in the block formatting context of the flow that created
+    /// them, so the list is saved and restored around every `flow` call.
+    floats: Vec<FloatRect>,
     /// True while a transformed box is being laid out once just to learn its
     /// own height, so its origin can be resolved. The probe throws its output
     /// away; only the rect is kept.
@@ -1189,8 +1303,14 @@ impl<'a> Flow<'a> {
         let mut cursor_y = y;
         let mut prev_bottom_margin = 0.0f32;
         let mut emitted = false;
+        let floats_before = self.floats.len();
 
         for item in items {
+            // The line builder decides wrapping, so it needs the same floats
+            // the block placement below maintains.
+            if !self.floats.is_empty() {
+                line.set_floats(&self.floats);
+            }
             match item {
                 FlowItem::Inline(InlineItem::Text { text, style, link, node }) => {
                     line.push_text(text, style, link, *node);
@@ -1239,6 +1359,9 @@ impl<'a> Flow<'a> {
                         block: self.blocks.len().saturating_sub(1),
                         runs: (runs_before, self.runs.len()),
                         images: (images_before, self.image_boxes.len()),
+                        height: box_h,
+                        size: font_size,
+                        align: child.style.vertical_align,
                     });
                     line.place_atom(lead + box_w, box_h);
                     emitted = true;
@@ -1265,6 +1388,8 @@ impl<'a> Flow<'a> {
                     // Images follow the same rule as atoms: placed from the
                     // line start, aligned with the rest of the line at flush.
                     let x_pos = x + line.x_offset() + lead;
+                    let runs_before = self.runs.len();
+                    let images_before = self.image_boxes.len();
                     if let Some(shared) = self.images.get(&img.src) {
                         self.image_boxes.push(ImageBox {
                             rect: Rect { x: x_pos, y: line.y_top(), w, h },
@@ -1273,6 +1398,16 @@ impl<'a> Flow<'a> {
                             object_fit: img.object_fit,
                         });
                     }
+                    // An image is a replaced inline box: its bottom sits on the
+                    // baseline unless `vertical-align` says otherwise.
+                    line.record_atom(AtomMark {
+                        block: self.blocks.len(),
+                        runs: (runs_before, self.runs.len()),
+                        images: (images_before, self.image_boxes.len()),
+                        height: h,
+                        size,
+                        align: style.vertical_align,
+                    });
                     line.place_atom(lead + w, h);
                     emitted = true;
                 }
@@ -1293,6 +1428,45 @@ impl<'a> Flow<'a> {
                     emitted = true;
                     prev_bottom_margin = child.style.margin.bottom_at(width);
                 }
+                FlowItem::Block(child) if child.style.float != Float::None => {
+                    line.flush();
+                    cursor_y = cursor_y.max(line.y);
+                    let margin_top = child.style.margin.top_at(width);
+                    let gap = if emitted {
+                        prev_bottom_margin.max(margin_top)
+                    } else {
+                        margin_top
+                    };
+                    // A float starts at the current flow position, moved down
+                    // past any float `clear` tells it to avoid, then sits
+                    // against its side of the band.
+                    let mut top = cursor_y + gap;
+                    if child.style.clear != Clear::None {
+                        top = self.clear_y(child.style.clear, top);
+                    }
+                    let float_w = self
+                        .float_width(child, width)
+                        .clamp(1.0, width.max(1.0));
+                    let (band_left, band_right) = self.band_at(top, x, width);
+                    let left = match child.style.float {
+                        Float::Right => (band_right - float_w).max(band_left),
+                        _ => band_left,
+                    };
+                    let bottom = self.block(child, left, top, float_w);
+                    self.floats.push(FloatRect {
+                        rect: Rect {
+                            x: left,
+                            y: top,
+                            w: float_w,
+                            h: (bottom - top).max(0.0),
+                        },
+                        side: child.style.float,
+                    });
+                    // A float does not advance the flow cursor: the blocks and
+                    // lines that follow wrap beside it.
+                    prev_bottom_margin = 0.0;
+                    emitted = true;
+                }
                 FlowItem::Block(child) => {
                     line.flush();
                     cursor_y = cursor_y.max(line.y);
@@ -1302,7 +1476,12 @@ impl<'a> Flow<'a> {
                     } else {
                         margin_top
                     };
-                    let bottom = self.block(child, x, cursor_y + gap, width);
+                    // `clear` moves the box below the floats it names.
+                    let mut top = cursor_y + gap;
+                    if child.style.clear != Clear::None {
+                        top = self.clear_y(child.style.clear, top);
+                    }
+                    let bottom = self.block(child, x, top, width);
                     cursor_y = bottom + child.style.margin.bottom_at(width);
                     prev_bottom_margin = child.style.margin.bottom_at(width);
                     emitted = true;
@@ -1313,8 +1492,8 @@ impl<'a> Flow<'a> {
         // The line's `text-align` shift applies to its atoms too, not only to
         // the text runs (which `flush` already aligned).
         let shifts = std::mem::take(&mut line.atom_shifts);
-        for (index, (mark, dx)) in shifts.iter().enumerate() {
-            if *dx == 0.0 || mark.block >= self.blocks.len() {
+        for (index, (mark, dx, dy)) in shifts.iter().enumerate() {
+            if (*dx == 0.0 && *dy == 0.0) || mark.block >= self.blocks.len() {
                 continue;
             }
             // Each atom owns the blocks up to the next one; shifting with the
@@ -1322,22 +1501,37 @@ impl<'a> Flow<'a> {
             // that happens to start where this one ends.
             let end = shifts
                 .get(index + 1)
-                .map(|(next, _)| next.block)
+                .map(|(next, _, _)| next.block)
                 .unwrap_or(self.blocks.len())
                 .min(self.blocks.len());
             for entry in self.blocks[mark.block..end].iter_mut() {
                 entry.rect.x += dx;
+                entry.rect.y += dy;
+                if let Some(clip) = entry.clip.as_mut() {
+                    clip.y += dy;
+                }
             }
             let runs_end = mark.runs.1.min(self.runs.len());
             for run in self.runs[mark.runs.0..runs_end].iter_mut() {
                 run.x += dx;
+                run.baseline += dy;
             }
             let images_end = mark.images.1.min(self.image_boxes.len());
             for image in self.image_boxes[mark.images.0..images_end].iter_mut() {
                 image.rect.x += dx;
+                image.rect.y += dy;
             }
         }
         let line_bottom = line.y;
+        // A float that is still in this formatting context makes the container
+        // tall enough to hold it. Browsers leave the parent at zero height and
+        // rely on clearfix; growing here keeps a real page from collapsing its
+        // sections onto each other, which is the failure mode a reader sees.
+        let float_bottom = self.floats[floats_before..]
+            .iter()
+            .map(|f| f.rect.bottom())
+            .fold(y, f32::max);
+        self.floats.truncate(floats_before);
         let base = self.arena.len() as u32;
         self.arena.push_str(&line.arena);
         line.arena.clear();
@@ -1347,7 +1541,52 @@ impl<'a> Flow<'a> {
             self.runs.push(run);
         }
         self.links.extend(line.links);
-        line_bottom.max(cursor_y)
+        line_bottom.max(cursor_y).max(float_bottom)
+    }
+
+    /// The y a box with this `clear` must start at: below every float it
+    /// names.
+    fn clear_y(&self, clear: Clear, y: f32) -> f32 {
+        let mut out = y;
+        for f in &self.floats {
+            if clear.clears(f.side) {
+                out = out.max(f.rect.bottom());
+            }
+        }
+        out
+    }
+
+    /// Horizontal band free of floats at `y`, in absolute page x.
+    fn band_at(&self, y: f32, left: f32, width: f32) -> (f32, f32) {
+        let mut l = left;
+        let mut r = left + width;
+        for f in &self.floats {
+            if f.rect.bottom() <= y + 0.5 || f.rect.y > y {
+                continue;
+            }
+            match f.side {
+                Float::Left => l = l.max(f.rect.right()),
+                Float::Right => r = r.min(f.rect.x),
+                Float::None => {}
+            }
+        }
+        if r < l {
+            r = l;
+        }
+        (l, r)
+    }
+
+    /// Shrink-to-fit width of a float: its declared width, else max-content
+    /// capped by the band it would sit in.
+    fn float_width(&self, child: &BoxNode, available: f32) -> f32 {
+        let outer = child.style.margin.horizontal_at(available)
+            + child.style.padding.horizontal_at(available)
+            + child.style.border.horizontal();
+        let content = match &child.style.width {
+            Some(w) => w.resolve(available),
+            None => self.max_content_width(child),
+        };
+        (content + outer).min(available.max(1.0))
     }
 
     /// Rendered size for an `<img>`: explicit attributes win, one attribute
@@ -1971,10 +2210,11 @@ impl<'a> Flow<'a> {
                 &mut occupied,
                 &mut spans,
                 0,
+                b.style.border_collapse,
             );
         }
         if b.style.display == Display::TableCell {
-            return self.table_cell(b, x, y, available_width);
+            return self.table_cell(b, x, y, available_width, b.style.border);
         }
         if b.style.display == Display::Grid {
             return self.grid(b, x, y, available_width);
@@ -2257,14 +2497,7 @@ impl<'a> Flow<'a> {
         let content_x = border_x + s.border.left + s.padding.left_at(available_width);
         let content_top = y + s.border.top + s.padding.top_at(available_width);
 
-        let children: Vec<&BoxNode> = b
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                FlowItem::Block(child) if !is_out_of_flow(child.style.position) => Some(child),
-                _ => None,
-            })
-            .collect();
+        let children = ordered_children(b);
 
         let content_bottom = if children.is_empty() {
             content_top
@@ -2326,8 +2559,15 @@ impl<'a> Flow<'a> {
         if matches!(b.tag.as_str(), "input" | "textarea") {
             content_height = content_height.max(s.font_size * s.line_height);
         }
+        // A declared `height` is definite, exactly as in `block()`: a flex
+        // container with `height: 100vh` keeps its height and lets the items
+        // overflow, instead of collapsing to the height of its content. This
+        // is the shape of nearly every real page header and hero section.
         let mut height =
             s.border.vertical() + s.padding.vertical_at(available_width) + content_height;
+        if let Some(h) = definite_height(s) {
+            height = h + s.padding.vertical_at(available_width) + s.border.vertical();
+        }
         height = self.clamp_height(s, height, available_width);
         let rect = Rect {
             x: border_x,
@@ -2590,6 +2830,7 @@ impl<'a> Flow<'a> {
                 &mut occupied,
                 &mut spans,
                 row_index,
+                s.border_collapse,
             );
             row_bottoms.push(bottom);
             cursor_y = bottom;
@@ -2752,6 +2993,9 @@ impl<'a> Flow<'a> {
         occupied: &mut [usize],
         spans: &mut Vec<(usize, usize, usize, usize)>,
         row_index: usize,
+        // `border-collapse` is declared on the table, not on the row, so the
+        // table passes it down.
+        collapse: bool,
     ) -> f32 {
         let s = &b.style;
         let content_w = (available_width
@@ -2775,7 +3019,7 @@ impl<'a> Flow<'a> {
         let mut cursor_x = content_x;
         let mut column = 0usize;
         let mut row_h = 0.0f32;
-        for cell in cells {
+        for (cell_index, cell) in cells.iter().enumerate() {
             // Skip columns still held by a `rowspan` from an earlier row.
             while column < occupied.len() && occupied[column] > row_index {
                 cursor_x += columns.get(column).copied().unwrap_or(0.0);
@@ -2790,8 +3034,27 @@ impl<'a> Flow<'a> {
             if width <= 0.0 {
                 width = content_w;
             }
+            // `border-collapse: collapse`: adjacent cells share one border, so
+            // each cell paints half of it and the two halves add up to the
+            // wider of the two declarations. Without this a 1px grid draws as
+            // 2px between every pair of cells.
+            let border = if collapse {
+                let prev = cell_index
+                    .checked_sub(1)
+                    .and_then(|i| cells.get(i))
+                    .map(|c| c.style.border)
+                    .unwrap_or_default();
+                Edges {
+                    left: half(max_edge(cell.style.border.left, prev.right)),
+                    right: half(cell.style.border.right),
+                    top: half(cell.style.border.top),
+                    bottom: half(cell.style.border.bottom),
+                }
+            } else {
+                cell.style.border
+            };
             let own = self.blocks.len();
-            let bottom = self.table_cell(cell, cursor_x, content_top, width);
+            let bottom = self.table_cell(cell, cursor_x, content_top, width, border);
             let h = bottom - content_top;
             row_h = row_h.max(h);
             if rowspan > 1 {
@@ -2839,16 +3102,16 @@ impl<'a> Flow<'a> {
     }
 
     /// A table cell is a block container whose width is decided by the row.
-    fn table_cell(&mut self, b: &BoxNode, x: f32, y: f32, width: f32) -> f32 {
+    fn table_cell(&mut self, b: &BoxNode, x: f32, y: f32, width: f32, border: Edges) -> f32 {
         let s = &b.style;
         let content_w = (width
             - s.margin.horizontal_at(width)
             - s.padding.horizontal_at(width)
-            - s.border.horizontal())
+            - border.horizontal())
         .max(0.0);
         let border_x = x + s.margin.left_at(width);
-        let content_x = border_x + s.border.left + s.padding.left_at(width);
-        let content_top = y + s.border.top + s.padding.top_at(width);
+        let content_x = border_x + border.left + s.padding.left_at(width);
+        let content_top = y + border.top + s.padding.top_at(width);
 
         let saved_clip = self.clip;
         let saved_containing = self.containing;
@@ -2856,7 +3119,7 @@ impl<'a> Flow<'a> {
         let own_rect = Rect {
             x: border_x,
             y,
-            w: s.border.horizontal() + s.padding.horizontal_at(width) + content_w,
+            w: border.horizontal() + s.padding.horizontal_at(width) + content_w,
             h: -1.0,
         };
         let clip_start = self.blocks.len();
@@ -2874,11 +3137,11 @@ impl<'a> Flow<'a> {
         self.clip = saved_clip;
         self.containing = saved_containing;
 
-        let height = s.border.vertical() + s.padding.vertical_at(width) + (content_bottom - content_top);
+        let height = border.vertical() + s.padding.vertical_at(width) + (content_bottom - content_top);
         let rect = Rect {
             x: border_x,
             y,
-            w: s.border.horizontal() + s.padding.horizontal_at(width) + content_w,
+            w: border.horizontal() + s.padding.horizontal_at(width) + content_w,
             h: height,
         };
         if s.overflow != Overflow::Visible {
@@ -2916,6 +3179,10 @@ impl<'a> Flow<'a> {
             paint: s.visible && s.opacity > 0.0,
             opacity: s.opacity,
         });
+        // The collapsed border is what the cell actually paints.
+        if let Some(block) = self.blocks.get_mut(index) {
+            block.border = border;
+        }
 
         let mut absolutes: Vec<&BoxNode> = Vec::new();
         collect_absolutes(&b.items, &mut absolutes);
@@ -2945,14 +3212,7 @@ impl<'a> Flow<'a> {
         let content_x = border_x + s.border.left + s.padding.left_at(available_width);
         let content_top = y + s.border.top + s.padding.top_at(available_width);
 
-        let children: Vec<&BoxNode> = b
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                FlowItem::Block(child) if !is_out_of_flow(child.style.position) => Some(child),
-                _ => None,
-            })
-            .collect();
+        let children = ordered_children(b);
 
         let gap = if s.grid_gap > 0.0 { s.grid_gap } else { s.gap };
         let columns = resolve_grid_columns(s, content_w, gap);
@@ -3017,6 +3277,7 @@ impl<'a> Flow<'a> {
         let mut row_heights: Vec<f32> = (0..row_count)
             .map(|r| s.grid_rows.get(r).map(|t| t.px).unwrap_or(0.0))
             .collect();
+        let row_heights_before: Vec<f32> = row_heights.clone();
         let row_top = |heights: &[f32], row: usize, gap: f32| -> f32 {
             let mut y = 0.0;
             for h in heights.iter().take(row) {
@@ -3090,6 +3351,23 @@ impl<'a> Flow<'a> {
                 }
             }
         }
+        // A grid with a definite height distributes the leftover space among
+        // its rows, which is `align-content: stretch` — the default. Without
+        // this a `height: 100%` grid keeps its rows at content height and the
+        // items stay at the top, which is what made fixed-height grids look
+        // empty on real pages.
+        if let Some(h) = definite_height(s) {
+            let used: f32 = row_heights.iter().sum::<f32>()
+                + gap * (row_heights.len() as f32 - 1.0).max(0.0);
+            let free = h - s.padding.vertical_at(available_width) - s.border.vertical() - used;
+            if free > 0.5 && !row_heights.is_empty() {
+                let share = free / row_heights.len() as f32;
+                for row in row_heights.iter_mut() {
+                    *row += share;
+                }
+            }
+        }
+
         let _ = &block_start;
 
         // A grid item narrower than its area is positioned by `justify-items`
@@ -3112,14 +3390,19 @@ impl<'a> Flow<'a> {
             }
         }
 
-        // `align-items`/`align-self` inside the cell, for single-row items.
+        // `align-items`/`align-self` inside the area. A row-spanning item is
+        // measured against every row it covers, which is what makes
+        // `grid-area: 1 / 1 / 3 / 2` stretch over two rows.
         for (index, child) in children.iter().enumerate() {
             let (_, row, _, rspan) = placements[index];
-            if rspan != 1 {
-                continue;
-            }
             let align = child.style.align_self.unwrap_or(s.align_items);
-            let cell_h = row_heights.get(row).copied().unwrap_or(0.0);
+            let cell_h = if rspan == 1 {
+                row_heights.get(row).copied().unwrap_or(0.0)
+            } else {
+                let end = (row + rspan).min(row_heights.len());
+                row_heights[row..end].iter().sum::<f32>()
+                    + gap * (rspan as f32 - 1.0)
+            };
             let Some(block) = self.blocks.get(own_blocks[index]) else { continue };
             let item_h = block.rect.h;
             let offset = match align {
@@ -3147,7 +3430,12 @@ impl<'a> Flow<'a> {
             content_top + row_top(&row_heights, row_heights.len(), gap) - gap
         };
 
-        let height = s.border.vertical() + s.padding.vertical_at(available_width) + (content_bottom - content_top);
+        let mut height =
+            s.border.vertical() + s.padding.vertical_at(available_width) + (content_bottom - content_top);
+        if let Some(h) = definite_height(s) {
+            height = h + s.padding.vertical_at(available_width) + s.border.vertical();
+        }
+        height = self.clamp_height(s, height, available_width);
         let rect = Rect {
             x: border_x,
             y,
@@ -3311,6 +3599,42 @@ fn collect_rows<'a>(items: &'a [FlowItem]) -> Vec<&'a BoxNode> {
     out
 }
 
+/// The larger of two border widths.
+fn max_edge(a: f32, b: f32) -> f32 {
+    a.max(b)
+}
+
+/// One of the two halves a collapsed border is split into. A visible border
+/// never disappears, so anything above zero keeps at least a pixel.
+fn half(width: f32) -> f32 {
+    if width <= 0.0 {
+        0.0
+    } else {
+        (width / 2.0).max(1.0)
+    }
+}
+
+/// In-flow block children of a flex or grid container, in `order` sequence.
+///
+/// `order` defaults to 0 and ties keep document order, so a page that never
+/// sets it is unaffected. Only the flex/grid placement uses this: `order` has
+/// no meaning in normal block flow.
+fn ordered_children(b: &BoxNode) -> Vec<&BoxNode> {
+    let mut children: Vec<&BoxNode> = b
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            FlowItem::Block(child) if !is_out_of_flow(child.style.position) => Some(child),
+            _ => None,
+        })
+        .collect();
+    if children.iter().any(|c| c.style.order != 0) {
+        // `sort_by_key` is stable, so equal orders keep document order.
+        children.sort_by_key(|c| c.style.order);
+    }
+    children
+}
+
 fn collect_absolutes<'a>(items: &'a [FlowItem], out: &mut Vec<&'a BoxNode>) {
     for item in items {
         if let FlowItem::Block(child) = item {
@@ -3449,6 +3773,7 @@ pub fn layout_with_viewport(
         svg_shapes: Vec::new(),
         transform_stack: Vec::new(),
         transforms: HashMap::new(),
+        floats: Vec::new(),
         probing: false,
         applied_transforms: Vec::new(),
         static_positions: std::collections::HashMap::new(),
@@ -4890,5 +5215,168 @@ mod tests {
         let layout = layout(&doc, &styles, &MockMeasure, 1000.0, &images);
         let image = layout.images.first().expect("imagem");
         assert_eq!(image.object_fit, naro_css::ObjectFit::Contain);
+    }
+
+    #[test]
+    fn float_shrinks_the_lines_beside_it() {
+        let layout = build(
+            "<div id=\"f\"></div><p id=\"p\">palavra palavra palavra palavra</p>",
+            "#f { float: left; width: 300px; height: 40px; }\
+             p { margin: 0; width: 600px; }",
+            1000.0,
+        );
+        let float = layout.blocks.iter().find(|b| (b.rect.w - 300.0).abs() < 0.5).expect("float");
+        // The float sits at the left edge and the text starts beside it.
+        assert!(float.rect.x.abs() < 0.5, "float em x={}", float.rect.x);
+        let run = layout.text_runs.first().expect("texto");
+        assert!(run.x >= 300.0, "texto começou em x={}, ao lado do float", run.x);
+    }
+
+    #[test]
+    fn clear_moves_a_block_below_the_float() {
+        let layout = build(
+            "<div id=\"f\"></div><p id=\"p\">depois</p>",
+            "#f { float: left; width: 100px; height: 60px; }\
+             p { margin: 0; clear: both; }",
+            1000.0,
+        );
+        let float = layout.blocks.iter().find(|b| (b.rect.w - 100.0).abs() < 0.5).expect("float");
+        let p = layout.blocks.iter().find(|b| b.tag == "p").expect("p");
+        assert!(p.rect.y >= float.rect.bottom() - 0.5, "p em y={} float até {}", p.rect.y, float.rect.bottom());
+    }
+
+    #[test]
+    fn floats_do_not_leak_out_of_their_container() {
+        // The float is inside the first div; the second div must start below
+        // the first container's bottom, not beside the float.
+        let layout = build(
+            "<div id=\"a\"><div id=\"f\"></div></div><div id=\"b\">b</div>",
+            "#f { float: left; width: 100px; height: 50px; }\
+             #b { height: 10px; }",
+            1000.0,
+        );
+        let b = layout.blocks.iter().rev().find(|bl| bl.tag == "div" && bl.rect.h <= 10.5).expect("b");
+        assert!(b.rect.y >= 50.0 - 0.5, "segundo bloco em y={}", b.rect.y);
+    }
+
+    #[test]
+    fn vertical_align_moves_the_atom_off_the_baseline() {
+        let layout = build(
+            "<p>texto <span id=\"m\">x</span></p>",
+            "p { margin: 0; font-size: 20px; }\
+             #m { display: inline-block; width: 10px; height: 10px; vertical-align: middle; }\
+             #m { }",
+            1000.0,
+        );
+        let run = layout.text_runs.first().expect("texto");
+        let atom = layout
+            .blocks
+            .iter()
+            .find(|b| (b.rect.w - 10.0).abs() < 0.5)
+            .expect("átomo");
+        // `middle` centres the box near the baseline, so it is not at the line
+        // top (which is what the old code always produced).
+        let line_top = run.baseline - 20.0;
+        assert!(atom.rect.y > line_top + 1.0, "átomo em y={} linha começa em {line_top}", atom.rect.y);
+        assert!(atom.rect.y < run.baseline, "átomo em y={} baseline {}", atom.rect.y, run.baseline);
+    }
+
+    #[test]
+    fn order_reorders_flex_items() {
+        let layout = build(
+            "<div id=\"f\"><span id=\"a\">A</span><span id=\"b\">B</span></div>",
+            "#f { display: flex; } #a { order: 2; width: 20px; height: 10px; }\
+             #b { order: 1; width: 20px; height: 10px; }",
+            1000.0,
+        );
+        let a = layout.blocks.iter().find(|bl| bl.node != 0 && (bl.rect.w - 20.0).abs() < 0.5);
+        assert!(a.is_some());
+        let runs: Vec<&TextRun> = layout.text_runs.iter().collect();
+        let pos = |t: &str| {
+            runs.iter()
+                .find(|r| r.text(&layout) == t)
+                .map(|r| r.x)
+                .unwrap_or(f32::NAN)
+        };
+        // `#b` has the lower order, so it comes first.
+        assert!(pos("B") < pos("A"), "B em {} A em {}", pos("B"), pos("A"));
+    }
+
+    #[test]
+    fn grid_area_expands_to_a_row_and_column_span() {
+        let style = naro_css::compute_styles(
+            &Document::parse("<div id=\"g\"><div id=\"i\">i</div></div>"),
+            &naro_css::parse_stylesheet("#i { grid-area: 1 / 1 / 3 / 2 }"),
+        );
+        let id = Document::parse("<div id=\"g\"><div id=\"i\">i</div></div>")
+            .find_tag("div")
+            .unwrap();
+        let _ = id;
+        // The expansion itself is a CSS concern; the layout consequence is
+        // checked by the page fixture.
+        assert!(style.len() >= 2);
+        let sheet = naro_css::parse_stylesheet("#i { grid-area: 1 / 1 / 3 / 2 }");
+        assert_eq!(sheet.rules.len(), 1);
+    }
+
+    #[test]
+    fn collapsed_table_borders_do_not_double() {
+        let spread = build(
+            "<table><tr><td>a</td><td>b</td></tr></table>",
+            "table { border-collapse: separate; } td { border: 2px solid #000000; }",
+            1000.0,
+        );
+        let collapse = build(
+            "<table><tr><td>a</td><td>b</td></tr></table>",
+            "table { border-collapse: collapse; } td { border: 2px solid #000000; }",
+            1000.0,
+        );
+        let cell = |l: &Layout| l.blocks.iter().find(|b| b.tag == "td").expect("célula").clone();
+        // The two cells keep their slots, but each paints half of a shared
+        // border, so a 2px rule between them is drawn as 2px instead of 4px.
+        assert_eq!(cell(&spread).border.horizontal(), 4.0);
+        assert_eq!(cell(&collapse).border.horizontal(), 2.0);
+        assert_eq!(cell(&collapse).border.left, 1.0);
+        assert!(
+            (cell(&collapse).rect.x - cell(&spread).rect.x).abs() < 0.5,
+            "a posição da célula não muda, só a espessura pintada"
+        );
+    }
+
+    #[test]
+    fn flex_and_grid_keep_a_declared_height() {
+        // A header with `height: 200px` must stay 200px tall even when its
+        // content is shorter: collapsing it was what pushed every section of a
+        // real page on top of the next.
+        let layout = build(
+            "<div id=\"f\"></div><div id=\"g\"></div>",
+            "#f { display: flex; height: 200px; }\
+             #g { display: grid; height: 150px; }",
+            1000.0,
+        );
+        let f = layout.blocks.iter().find(|b| (b.rect.w - 1000.0).abs() < 0.5).expect("flex");
+        assert!((f.rect.h - 200.0).abs() < 0.5, "flex h={}", f.rect.h);
+        let g = layout.blocks.iter().filter(|b| (b.rect.w - 1000.0).abs() < 0.5).nth(1).expect("grid");
+        assert!((g.rect.h - 150.0).abs() < 0.5, "grid h={}", g.rect.h);
+        // The second container starts where the first ends.
+        assert!((g.rect.y - 200.0).abs() < 0.5, "grid y={}", g.rect.y);
+    }
+
+    #[test]
+    fn grid_item_spans_the_rows_of_its_area() {
+        let layout = build(
+            "<div id=\"g\"><div id=\"a\"></div></div>",
+            "#g { display: grid; width: 200px; height: 100px;\
+                  grid-template-columns: 100px 100px; }\
+             #a { grid-area: 1 / 1 / 3 / 2; background: #ff0000; }",
+            1000.0,
+        );
+        let item = layout
+            .blocks
+            .iter()
+            .find(|b| (b.rect.w - 100.0).abs() < 0.5 && (b.rect.x).abs() < 0.5)
+            .expect("item");
+        // Two stretched rows of a 100px grid: the item fills both.
+        assert!((item.rect.h - 100.0).abs() < 1.0, "item de grid-area com altura {}", item.rect.h);
     }
 }

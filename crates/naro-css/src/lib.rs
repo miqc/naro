@@ -262,6 +262,53 @@ pub enum ObjectFit {
     ScaleDown,
 }
 
+/// `float`. A float is taken out of the normal flow and placed against one
+/// side of its containing block; line boxes beside it are shortened.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Float {
+    #[default]
+    None,
+    Left,
+    Right,
+}
+
+/// `clear`: the element must start below the floats on the given side.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Clear {
+    #[default]
+    None,
+    Left,
+    Right,
+    Both,
+}
+
+impl Clear {
+    /// Does this value clear a float on `side`?
+    pub fn clears(self, side: Float) -> bool {
+        match self {
+            Clear::None => false,
+            Clear::Both => true,
+            Clear::Left => side == Float::Left,
+            Clear::Right => side == Float::Right,
+        }
+    }
+}
+
+/// `vertical-align`, reduced to what the line builder can place.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum VerticalAlign {
+    #[default]
+    Baseline,
+    Middle,
+    Top,
+    Bottom,
+    Sub,
+    Super,
+    /// A `<length>` or `<percentage>` of the element's own font size, in
+    /// pixels. Positive moves the box down, which is the CSS sign.
+    Length(f32),
+}
+
 /// Standard HSL to RGB. Hue in degrees (any range), saturation and lightness in
 /// `0..=1`.
 fn hsl_to_rgb(hue: f32, sat: f32, light: f32) -> (u8, u8, u8) {
@@ -684,6 +731,13 @@ pub struct ComputedStyle {
     pub object_fit: ObjectFit,
     /// `aspect-ratio` as `w / h`.
     pub aspect_ratio: Option<f32>,
+    pub float: Float,
+    pub clear: Clear,
+    pub vertical_align: VerticalAlign,
+    /// `border-collapse: collapse` on a table.
+    pub border_collapse: bool,
+    /// `order` inside a flex or grid container.
+    pub order: i32,
 }
 
 impl Default for ComputedStyle {
@@ -748,6 +802,11 @@ impl Default for ComputedStyle {
             transform_origin: (0.5, 0.5),
             object_fit: ObjectFit::Fill,
             aspect_ratio: None,
+            float: Float::None,
+            clear: Clear::None,
+            vertical_align: VerticalAlign::Baseline,
+            border_collapse: false,
+            order: 0,
         }
     }
 }
@@ -807,6 +866,20 @@ pub fn computed_value(style: &ComputedStyle, prop: &str) -> Option<String> {
         "font-size" => format!("{}px", css_num(style.font_size)),
         "font-weight" => style.font_weight.to_string(),
         "font-family" => style.font_family.clone(),
+        "float" => match style.float {
+            Float::None => "none",
+            Float::Left => "left",
+            Float::Right => "right",
+        }
+        .to_string(),
+        "clear" => match style.clear {
+            Clear::None => "none",
+            Clear::Left => "left",
+            Clear::Right => "right",
+            Clear::Both => "both",
+        }
+        .to_string(),
+        "order" => style.order.to_string(),
         "object-fit" => match style.object_fit {
             ObjectFit::Fill => "fill",
             ObjectFit::Contain => "contain",
@@ -913,6 +986,10 @@ impl ComputedStyle {
             || self.transform != other.transform
             || self.transform_origin != other.transform_origin
             || self.object_fit != other.object_fit
+            // Floats, `clear` and `order` all move boxes.
+            || self.float != other.float
+            || self.clear != other.clear
+            || self.order != other.order
     }
 }
 
@@ -1273,6 +1350,47 @@ fn parse_gradient_stops(parts: &[String]) -> Option<Vec<(f32, Color)>> {
         .collect();
     out.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     Some(out)
+}
+
+/// `vertical-align`, with lengths and percentages resolved against the
+/// element's own font size (which is what CSS uses for this property).
+fn parse_vertical_align(value: &str, ctx: LengthCtx) -> VerticalAlign {
+    let lower = value.trim().to_ascii_lowercase();
+    match lower.as_str() {
+        "baseline" => VerticalAlign::Baseline,
+        "middle" => VerticalAlign::Middle,
+        "top" | "text-top" => VerticalAlign::Top,
+        "bottom" | "text-bottom" => VerticalAlign::Bottom,
+        "sub" => VerticalAlign::Sub,
+        "super" => VerticalAlign::Super,
+        _ => match parse_length(&lower, ctx) {
+            Some(px) => VerticalAlign::Length(px),
+            None => VerticalAlign::Baseline,
+        },
+    }
+}
+
+/// `grid-area: <row-start> / <column-start> / <row-end> / <column-end>`.
+///
+/// Named areas and named lines are not modelled; only the numeric form (and
+/// `auto`/`span N` in each slot) is understood. Each pair becomes the same
+/// `GridPlacement` the longhands would have produced.
+fn parse_grid_area(value: &str) -> Option<(GridPlacement, GridPlacement)> {
+    let parts: Vec<&str> = value.split('/').map(|p| p.trim()).collect();
+    let (row_part, column_part) = match parts.len() {
+        1 => (parts[0], "auto"),
+        2 => (parts[0], parts[1]),
+        4 => {
+            let row = format!("{} / {}", parts[0], parts[2]);
+            let column = format!("{} / {}", parts[1], parts[3]);
+            return Some((
+                parse_placement(&row)?,
+                parse_placement(&column)?,
+            ));
+        }
+        _ => return None,
+    };
+    Some((parse_placement(row_part)?, parse_placement(column_part)?))
 }
 
 /// Parse a `transform` list. Any function this does not model (`skew`,
@@ -3503,6 +3621,10 @@ fn parse_placement(value: &str) -> Option<GridPlacement> {
         if let Some(span) = part.strip_prefix("span ") {
             return Some((None, span.trim().parse().ok()?));
         }
+        // `auto` and named lines have no line number; they auto-place.
+        if part.eq_ignore_ascii_case("auto") {
+            return Some((None, 1));
+        }
         let n: u16 = part.parse().ok()?;
         Some((Some(n), 1))
     };
@@ -3716,6 +3838,38 @@ fn apply_declaration(
         }
         "aspect-ratio" => {
             style.aspect_ratio = parse_aspect_ratio(value);
+        }
+        "float" => {
+            style.float = match value.to_ascii_lowercase().as_str() {
+                "left" => Float::Left,
+                "right" => Float::Right,
+                _ => Float::None,
+            };
+        }
+        "clear" => {
+            style.clear = match value.to_ascii_lowercase().as_str() {
+                "left" => Clear::Left,
+                "right" => Clear::Right,
+                "both" => Clear::Both,
+                _ => Clear::None,
+            };
+        }
+        "vertical-align" => {
+            style.vertical_align = parse_vertical_align(value, ctx);
+        }
+        "border-collapse" => {
+            style.border_collapse = value.eq_ignore_ascii_case("collapse");
+        }
+        "order" => {
+            if let Ok(n) = value.trim().parse::<i32>() {
+                style.order = n;
+            }
+        }
+        "grid-area" => {
+            if let Some((row, column)) = parse_grid_area(value) {
+                style.grid_row = row;
+                style.grid_column = column;
+            }
         }
         "margin" => {
             let parts: Vec<String> = split_top_level(value);

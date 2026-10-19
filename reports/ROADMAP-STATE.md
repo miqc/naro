@@ -1,6 +1,6 @@
 # Estado do roadmap
 
-Marco em execução: **v0.3** concluído (fases A4, A5a, A5b). Plano:
+Marco em execução: **A5c** concluída (completude de layout). Plano:
 `local://naro-roadmap-v03-plan.md`; roadmap global em `local://naro-global-roadmap-plan.md`.
 
 ## Fases
@@ -16,14 +16,13 @@ Marco em execução: **v0.3** concluído (fases A4, A5a, A5b). Plano:
 | A4 | concluída | tag `phase-a4`; `251 passed / 0 failed`; `--compat` **30 / 0 / 4** (34) e `--compat --serve` **33 / 0 / 1**; `34-fonts.html` prova `font-family`, `font-weight`, `@font-face` de um TTF commitado e a síntese de negrito (`ff=monospace`, `fw=700`, `fx=Naro Fixture, sans-serif`, `runfont:`, `boxdiff:`); 4 páginas de referência com `JS ERROR` e `CONTENT_HEIGHT` idênticos; `p8-rust-v03` difere em 2 hunks (at-rule 45→0, baseline de 96 px em 0.7 px) | 1 | WOFF2 bloqueado, ver abaixo |
 | A5a | concluída | tag `phase-a5a`; `268 passed / 0 failed`; `--compat` **31 / 0 / 4** (35) e `--compat --serve` **34 / 0 / 1**; `35-visual.html` com 8 `pixel:` (gradiente linear e radial, sombra com spread, círculo de raio percentual); `--bench-shadow 20` mede `(100,50)` em **6.98 ms** contra orçamento de 8 ms | 1 | ver desvios abaixo |
 | A5b | concluída | tag `phase-a5b`; `290 passed / 0 failed`; `--compat` **32 / 0 / 4** (36) e `--compat --serve` **35 / 0 / 1**; `36-transform.html` com 8 `pixel:`, `box:` provando layout intocado e `hit:`/`nothit:` provando o clique na posição pintada; testes de matriz pai→filho, espelho e `scale(0)` | 1 | ver desvios abaixo |
-| Marco v0.3 | concluída | `reports/milestone-v0.3.md`; tag `milestone-v0.3` | 1 | A5c, A6, A8 e A9 aguardam autorização |
+| Marco v0.3 | concluída | `reports/milestone-v0.3.md`; tag `milestone-v0.3` | 1 | A6, A8 e A9 aguardam autorização |
+| A5c | concluída | tag `phase-a5c`; `299 passed / 0 failed`; `--compat` **33 / 0 / 4** (37) e `--compat --serve` **36 / 0 / 1**; `37-layout-completo.html` com 9 `pixel:`, 3 `box:` e `computed:` para float/clear/order; `p8-rust-a5c` difere de `p8-rust-v03` em 2 linhas (baseline de dois rótulos "Language") | 1 | ver desvios abaixo |
 
 ## Próxima ação
 
-**A5c — completude de layout** (`float`/`clear`, `vertical-align`,
-`border-collapse`, `order`, `grid-area`), na ordem do roadmap global: depois de
-A5b e antes de A6. Aguarda autorização; o plano de A5c será escrito quando ela
-vier.
+**Diagnóstico estrutural de páginas reais** (hostinger, discord, chatgpt) antes de
+A6, conforme a etapa 2 da autorização. A6 (iframe/canvas) só começa depois dele.
 
 ## Bloqueios
 
@@ -39,6 +38,42 @@ vier.
    (`tests/compat/assets/fixture.ttf`, Roboto de `cdn.jsdelivr.net/fontsource`),
    porque commitar uma fonte do sistema é proibido por licença. Item "WOFF2"
    fica marcado como bloqueado, não como cumprido.
+
+## Desvios e decisões de A5c
+
+1. **`float`/`clear` com banda de exclusão real.** `Flow` mantém uma lista de
+   `FloatRect` por block formatting context (salva e restaurada em cada `flow`).
+   `LineBuilder` recebe a mesma lista e decide a quebra contra
+   `band_width(y)`, e o `flush` desloca a linha inteira pelo offset esquerdo da
+   banda — sem isso o texto era quebrado na largura certa mas desenhado em
+   `x = 0`, por baixo do flutuante.
+2. **O container cresce até o fundo do flutuante.** Navegadores deixam o pai em
+   altura zero e dependem de clearfix; aqui o `flow` devolve
+   `max(linha, cursor, fundo do float)`. Sem isso, duas seções de uma página real
+   se sobrepunham — o defeito estrutural mais visível.
+3. **`vertical-align` é aplicado no `flush`,** quando a baseline é conhecida: o
+   átomo é disposto no topo da linha e deslocado por `(dx, dy)`. Imagens passaram
+   a registrar `AtomMark` também, então `vertical-align` vale para `<img>`, não só
+   para `inline-block`. Um átomo alinhado pela baseline também aumenta o ascent da
+   linha, senão uma imagem alta era empurrada para fora dela.
+4. **`border-collapse: collapse` divide a borda entre células vizinhas** (metade
+   cada, mínimo 1 px), e a borda efetiva é a que a célula pinta. As posições das
+   células não mudam — só a espessura desenhada.
+5. **`order` ordena os filhos de flex e grid** com `sort_by_key` estável, então
+   empates mantêm a ordem do documento. Não se aplica a fluxo de bloco normal.
+6. **`grid-area` expande para `grid-row`/`grid-column`** no parser, incluindo a
+   forma de quatro valores; `auto` em qualquer slot significa auto-colocação.
+7. **Dois defeitos pré-existentes corrigidos junto**, porque são a mesma classe
+   de erro que a etapa 2 investiga e ambos apareciam em página real:
+   - `display: flex`/`grid` ignorava `height` declarado e colapsava para a altura
+     do conteúdo (um cabeçalho `height: 100vh` virava 0 px);
+   - um grid com altura definida não distribuía a sobra entre as linhas
+     (`align-content: stretch`, o padrão), então os itens ficavam amontoados no
+     topo e um `grid-area` de duas linhas media 0 px.
+8. **`p8-rust` re-baselinado** em `reports/p8-rust-a5c.txt`: 2 linhas diferem de
+   `p8-rust-v03` — o rótulo "Language" de um `<select>` desceu 8.6 px porque o
+   átomo baseline agora aumenta o ascent da linha. As 144 caixas continuam
+   idênticas e `CONTENT_HEIGHT` não mudou.
 
 ## Desvios e decisões de A5b
 

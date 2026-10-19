@@ -110,3 +110,9 @@
 # e não clicável na posição de layout — o que exercita `hit_node` e `hit_link`
 # com a mesma matriz.
 36-transform.html | log:t.box=100x100 | log:of.fit=contain | box:#t:100x100 | computed:#of:object-fit=contain | pixel:250,50=#ff0000 | pixel:50,50=#ffffff | pixel:20,210=#0000ff | pixel:20,195=#0000ff | pixel:5,210=#ffffff | pixel:350,10=#ffffff | pixel:350,50=#c81e1e | hit:430,310=#lk | nothit:30,310=#lk | nojsrerror
+# 37: completude de layout. Cada recurso tem um `pixel:` que só passa se o
+# efeito for real: o texto ao lado dos flutuantes, o `clear` abaixo deles, o
+# `vertical-align: middle` acima do topo da linha, o `order` trocando a ordem
+# visual, o `grid-area` ocupando as duas linhas e a borda colapsada com metade
+# da espessura por célula.
+37-layout-completo.html | log:fl=left | log:cl=both | log:oa=2 | computed:#fl:float=left | computed:#cl:clear=both | computed:#oa:order=2 | box:#fl:200x60 | box:#cl:1000x20 | box:#ga:300x60 | pixel:10,10=#ff0000 | pixel:950,10=#0000ff | pixel:10,70=#00ff00 | pixel:45,90=#ff00ff | pixel:150,135=#ffaa00 | pixel:50,135=#00aa00 | pixel:50,180=#8a1f1f | pixel:53,220=#000000 | nojsrerror
